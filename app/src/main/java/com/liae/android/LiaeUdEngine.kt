@@ -4,15 +4,12 @@ import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import android.content.Context
-import android.util.Log
 import java.nio.FloatBuffer
+import java.util.Locale
 
-class LiaeUdEngine(
-    context: Context
-) {
+class LiaeUdEngine(context: Context) {
 
     companion object {
-
         private const val MODEL_NAME =
             "LIAE_128_80_48_16_fp32.onnx"
 
@@ -21,7 +18,8 @@ class LiaeUdEngine(
 
     data class Result(
         val rgb: FloatArray,
-        val mask: FloatArray
+        val mask: FloatArray,
+        val debugText: String
     )
 
     private val env =
@@ -29,20 +27,10 @@ class LiaeUdEngine(
 
     private val session: OrtSession
 
-    var lastRgbShape: LongArray =
-        longArrayOf()
-        private set
-
-    var lastMaskShape: LongArray =
-        longArrayOf()
-        private set
-
     init {
 
         val modelFile =
-            context.getFileStreamPath(
-                MODEL_NAME
-            )
+            context.getFileStreamPath(MODEL_NAME)
 
         if (!modelFile.exists()) {
 
@@ -72,28 +60,19 @@ class LiaeUdEngine(
     ): Result {
 
         require(
-            src.size ==
-                SIZE * SIZE * 3
+            src.size == SIZE * SIZE * 3
         ) {
             "Source tensor size must be " +
                 "${SIZE * SIZE * 3}, got ${src.size}"
         }
 
         require(
-            dst.size ==
-                SIZE * SIZE * 3
+            dst.size == SIZE * SIZE * 3
         ) {
             "Target tensor size must be " +
                 "${SIZE * SIZE * 3}, got ${dst.size}"
         }
 
-        /*
-         * VERIFIED MODEL INPUT
-         *
-         * [1, 128, 128, 3]
-         *
-         * NHWC
-         */
         val inputShape =
             longArrayOf(
                 1,
@@ -127,39 +106,17 @@ class LiaeUdEngine(
 
                 val rgbTensor =
                     outputs["output_1"]
-                        .orElseThrow {
-                            IllegalStateException(
-                                "Missing output_1"
-                            )
-                        } as OnnxTensor
+                        ?.get() as? OnnxTensor
+                        ?: throw IllegalStateException(
+                            "Missing output_1"
+                        )
 
                 val maskTensor =
                     outputs["output_2"]
-                        .orElseThrow {
-                            IllegalStateException(
-                                "Missing output_2"
-                            )
-                        } as OnnxTensor
-
-                lastRgbShape =
-                    rgbTensor.info.shape
-
-                lastMaskShape =
-                    maskTensor.info.shape
-
-                Log.d(
-                    "LIAE",
-                    "RGB shape = " +
-                        lastRgbShape
-                            .contentToString()
-                )
-
-                Log.d(
-                    "LIAE",
-                    "Mask shape = " +
-                        lastMaskShape
-                            .contentToString()
-                )
+                        ?.get() as? OnnxTensor
+                        ?: throw IllegalStateException(
+                            "Missing output_2"
+                        )
 
                 val rgb =
                     flatten(
@@ -172,22 +129,59 @@ class LiaeUdEngine(
                     )
 
                 require(
-                    rgb.size ==
-                        SIZE * SIZE * 3
+                    rgb.size == SIZE * SIZE * 3
                 ) {
                     "Unexpected RGB size: ${rgb.size}"
                 }
 
                 require(
-                    mask.size ==
-                        SIZE * SIZE
+                    mask.size == SIZE * SIZE
                 ) {
                     "Unexpected Mask size: ${mask.size}"
                 }
 
+                val rgbMin =
+                    rgb.minOrNull() ?: 0f
+
+                val rgbMax =
+                    rgb.maxOrNull() ?: 0f
+
+                val rgbMean =
+                    rgb.average()
+
+                val maskMin =
+                    mask.minOrNull() ?: 0f
+
+                val maskMax =
+                    mask.maxOrNull() ?: 0f
+
+                val maskMean =
+                    mask.average()
+
+                val debugText =
+                    String.format(
+                        Locale.US,
+                        "LIAE DEBUG\n" +
+                            "RGB shape: [1,128,128,3]\n" +
+                            "MASK shape: [1,128,128,1]\n\n" +
+                            "RGB min: %.5f\n" +
+                            "RGB max: %.5f\n" +
+                            "RGB mean: %.5f\n\n" +
+                            "MASK min: %.5f\n" +
+                            "MASK max: %.5f\n" +
+                            "MASK mean: %.5f",
+                        rgbMin,
+                        rgbMax,
+                        rgbMean,
+                        maskMin,
+                        maskMax,
+                        maskMean
+                    )
+
                 Result(
                     rgb = rgb,
-                    mask = mask
+                    mask = mask,
+                    debugText = debugText
                 )
             }
 
