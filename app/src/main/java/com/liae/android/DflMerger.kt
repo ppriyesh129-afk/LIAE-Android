@@ -11,13 +11,31 @@ object DflMerger {
         warpedMask: Bitmap
     ): Bitmap {
 
-        require(background.width == warpedFace.width)
-        require(background.height == warpedFace.height)
-        require(background.width == warpedMask.width)
-        require(background.height == warpedMask.height)
+        require(
+            background.width ==
+                warpedFace.width
+        )
 
-        val w = background.width
-        val h = background.height
+        require(
+            background.height ==
+                warpedFace.height
+        )
+
+        require(
+            background.width ==
+                warpedMask.width
+        )
+
+        require(
+            background.height ==
+                warpedMask.height
+        )
+
+        val w =
+            background.width
+
+        val h =
+            background.height
 
         val backgroundPixels =
             IntArray(w * h)
@@ -69,15 +87,28 @@ object DflMerger {
             val facePixel =
                 facePixels[i]
 
+            /*
+             * Mask is stored as:
+             *
+             * R = mask
+             * G = mask
+             * B = mask
+             * A = 255
+             *
+             * Therefore reading RED is correct.
+             */
             val maskAlpha =
-                (
-                    (maskPixels[i] ushr 24)
+                Color.red(
+                    maskPixels[i]
                 ) / 255f
+
+            val inverseMask =
+                1f - maskAlpha
 
             val r =
                 (
                     Color.red(bgPixel) *
-                        (1f - maskAlpha) +
+                        inverseMask +
                     Color.red(facePixel) *
                         maskAlpha
                 )
@@ -87,7 +118,7 @@ object DflMerger {
             val g =
                 (
                     Color.green(bgPixel) *
-                        (1f - maskAlpha) +
+                        inverseMask +
                     Color.green(facePixel) *
                         maskAlpha
                 )
@@ -97,7 +128,7 @@ object DflMerger {
             val b =
                 (
                     Color.blue(bgPixel) *
-                        (1f - maskAlpha) +
+                        inverseMask +
                     Color.blue(facePixel) *
                         maskAlpha
                 )
