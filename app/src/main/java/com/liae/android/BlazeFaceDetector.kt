@@ -15,11 +15,9 @@ class BlazeFaceDetector(
     private val session: OrtSession
 ) {
 
-    private val environment =
-        OrtEnvironment.getEnvironment()
+    private val environment = OrtEnvironment.getEnvironment()
 
     companion object {
-
         private const val INPUT_SIZE = 128
         private const val ANCHOR_COUNT = 896
         private const val SCORE_THRESHOLD = 0.5f
@@ -36,21 +34,16 @@ class BlazeFaceDetector(
             return emptyList()
         }
 
-        /*
-         * Letterbox image into 128x128.
-         */
+        // ------------------------------------------------------------
+        // Letterbox original image into 128 x 128.
+        // ------------------------------------------------------------
+
         val scale =
             INPUT_SIZE.toFloat() /
-                    max(
-                        originalWidth,
-                        originalHeight
-                    ).toFloat()
+                max(originalWidth, originalHeight).toFloat()
 
-        val resizedWidth =
-            originalWidth * scale
-
-        val resizedHeight =
-            originalHeight * scale
+        val resizedWidth = originalWidth * scale
+        val resizedHeight = originalHeight * scale
 
         val padX =
             (INPUT_SIZE - resizedWidth) / 2f
@@ -58,19 +51,17 @@ class BlazeFaceDetector(
         val padY =
             (INPUT_SIZE - resizedHeight) / 2f
 
-        val matrix =
-            Matrix().apply {
+        val matrix = Matrix()
 
-                postScale(
-                    scale,
-                    scale
-                )
+        matrix.postScale(
+            scale,
+            scale
+        )
 
-                postTranslate(
-                    padX,
-                    padY
-                )
-            }
+        matrix.postTranslate(
+            padX,
+            padY
+        )
 
         val inputBitmap =
             Bitmap.createBitmap(
@@ -79,14 +70,18 @@ class BlazeFaceDetector(
                 Bitmap.Config.ARGB_8888
             )
 
-        val canvas =
-            Canvas(inputBitmap)
+        val canvas = Canvas(inputBitmap)
 
         canvas.drawBitmap(
             bitmap,
             matrix,
             null
         )
+
+        // ------------------------------------------------------------
+        // Create BlazeFace input.
+        // Model expects NCHW RGB [-1, 1].
+        // ------------------------------------------------------------
 
         val inputBuffer =
             createInput(inputBitmap)
@@ -105,18 +100,24 @@ class BlazeFaceDetector(
 
         val result =
             try {
+
                 session.run(
                     mapOf(
-                        session.inputNames.first()
-                            to tensor
+                        session.inputNames.first() to tensor
                     )
                 )
+
             } finally {
+
                 tensor.close()
                 inputBitmap.recycle()
             }
 
         try {
+
+            // --------------------------------------------------------
+            // Read BlazeFace outputs.
+            // --------------------------------------------------------
 
             val regressors =
                 extractFloat2D(
@@ -134,90 +135,108 @@ class BlazeFaceDetector(
             val candidates =
                 mutableListOf<Detection>()
 
-            for (i in 0 until ANCHOR_COUNT) {
+            // --------------------------------------------------------
+            // Decode 896 BlazeFace anchors.
+            // --------------------------------------------------------
 
-                if (
-                    i >= regressors.size ||
-                    i >= scores.size ||
-                    i >= anchors.size
-                ) {
-                    break
+            val count =
+                minOf(
+                    ANCHOR_COUNT,
+                    regressors.size,
+                    scores.size,
+                    anchors.size
+                )
+
+            for (i in 0 until count) {
+
+                val regression =
+                    regressors[i]
+
+                val scoreRow =
+                    scores[i]
+
+                if (regression.size < 16) {
+                    continue
                 }
 
-                if (
-                    regressors[i].size < 16 ||
-                    scores[i].isEmpty()
-                ) {
+                if (scoreRow.isEmpty()) {
                     continue
                 }
 
                 val score =
                     sigmoid(
-                        scores[i][0]
+                        scoreRow[0]
                     )
 
                 if (score < SCORE_THRESHOLD) {
                     continue
                 }
 
-                val values =
-                    regressors[i]
-
                 val anchor =
                     anchors[i]
 
+                // ----------------------------------------------------
+                // Bounding box.
+                // Coordinates are normalized to 128x128 space.
+                // ----------------------------------------------------
+
                 val cx =
-                    values[0] /
-                            INPUT_SIZE +
-                            anchor[0]
+                    regression[0] /
+                        INPUT_SIZE.toFloat() +
+                        anchor[0]
 
                 val cy =
-                    values[1] /
-                            INPUT_SIZE +
-                            anchor[1]
+                    regression[1] /
+                        INPUT_SIZE.toFloat() +
+                        anchor[1]
 
                 val width =
-                    values[2] /
-                            INPUT_SIZE
+                    regression[2] /
+                        INPUT_SIZE.toFloat()
 
                 val height =
-                    values[3] /
-                            INPUT_SIZE
+                    regression[3] /
+                        INPUT_SIZE.toFloat()
 
                 val x1 =
-                    cx -
-                            width / 2f
+                    cx - width / 2f
 
                 val y1 =
-                    cy -
-                            height / 2f
+                    cy - height / 2f
 
                 val x2 =
-                    cx +
-                            width / 2f
+                    cx + width / 2f
 
                 val y2 =
-                    cy +
-                            height / 2f
+                    cy + height / 2f
+
+                // ----------------------------------------------------
+                // Six BlazeFace keypoints.
+                //
+                // 0 = right eye
+                // 1 = left eye
+                // 2 = nose
+                // 3 = mouth
+                // 4 = right ear
+                // 5 = left ear
+                //
+                // We preserve all six.
+                // ----------------------------------------------------
 
                 val keypoints =
-                    Array(
-                        KEYPOINT_COUNT
-                    ) { keypointIndex ->
+                    Array(KEYPOINT_COUNT) { keypointIndex ->
 
                         val offset =
-                            4 +
-                                    keypointIndex *
-                                    2
+                            4 + keypointIndex * 2
 
                         floatArrayOf(
-                            values[offset] /
-                                    INPUT_SIZE +
-                                    anchor[0],
+                            regression[offset] /
+                                INPUT_SIZE.toFloat() +
+                                anchor[0],
 
-                            values[offset + 1] /
-                                    INPUT_SIZE +
-                                    anchor[1]
+                            regression[offset + 1] /
+                                INPUT_SIZE.toFloat() +
+                                anchor[1]
                         )
                     }
 
@@ -233,20 +252,28 @@ class BlazeFaceDetector(
                 )
             }
 
+            // --------------------------------------------------------
+            // Weighted NMS.
+            // --------------------------------------------------------
+
             val selected =
                 weightedNms(
                     candidates
                 )
 
-            /*
-             * Convert detector coordinates from
-             * 128x128 letterboxed space back into
-             * original image coordinates.
-             *
-             * IMPORTANT:
-             * We also convert all 6 landmarks.
-             */
-            return selected.map { detection ->
+            // --------------------------------------------------------
+            // Convert detector coordinates from letterboxed
+            // 128x128 space back into original image coordinates.
+            //
+            // The detector box itself is NOT forced to be square.
+            // --------------------------------------------------------
+
+            val output =
+                ArrayList<BlazeFaceResult>(
+                    selected.size
+                )
+
+            for (detection in selected) {
 
                 val x1 =
                     unletterbox(
@@ -281,42 +308,53 @@ class BlazeFaceDetector(
                     )
 
                 val keypoints =
-                    Array(
-                        KEYPOINT_COUNT
-                    ) { k ->
+                    Array(KEYPOINT_COUNT) { k ->
 
-                        floatArrayOf(
-
+                        val px =
                             unletterbox(
                                 detection.keypoints[k][0],
                                 padX,
                                 scale,
                                 originalWidth.toFloat()
-                            ),
+                            )
 
+                        val py =
                             unletterbox(
                                 detection.keypoints[k][1],
                                 padY,
                                 scale,
                                 originalHeight.toFloat()
                             )
-                        }
+
+                        floatArrayOf(
+                            px,
+                            py
+                        )
                     }
 
-                BlazeFaceResult(
-                    left = x1,
-                    top = y1,
-                    right = x2,
-                    bottom = y2,
-                    score = detection.score,
-                    keypoints = keypoints
+                output.add(
+                    BlazeFaceResult(
+                        left = x1,
+                        top = y1,
+                        right = x2,
+                        bottom = y2,
+                        score = detection.score,
+                        keypoints = keypoints
+                    )
                 )
             }
 
+            return output
+
         } finally {
+
             result.close()
         }
     }
+
+    // ================================================================
+    // ANCHORS
+    // ================================================================
 
     private fun generateAnchors(): List<FloatArray> {
 
@@ -325,26 +363,14 @@ class BlazeFaceDetector(
                 ANCHOR_COUNT
             )
 
-        /*
-         * 16x16 feature map
-         * 2 anchors per cell
-         *
-         * 16 * 16 * 2 = 512
-         */
+        // 16 x 16 x 2 = 512
         addGridAnchors(
             anchors = anchors,
             cells = 16,
             repeats = 2
         )
 
-        /*
-         * 8x8 feature map
-         * 6 anchors per cell
-         *
-         * 8 * 8 * 6 = 384
-         *
-         * Total = 896
-         */
+        // 8 x 8 x 6 = 384
         addGridAnchors(
             anchors = anchors,
             cells = 8,
@@ -366,11 +392,11 @@ class BlazeFaceDetector(
 
                 val centerX =
                     (x + 0.5f) /
-                            cells.toFloat()
+                        cells.toFloat()
 
                 val centerY =
                     (y + 0.5f) /
-                            cells.toFloat()
+                        cells.toFloat()
 
                 repeat(repeats) {
 
@@ -385,14 +411,17 @@ class BlazeFaceDetector(
         }
     }
 
+    // ================================================================
+    // IMAGE -> BLAZEFACE TENSOR
+    // ================================================================
+
     private fun createInput(
         bitmap: Bitmap
     ): FloatBuffer {
 
         val pixels =
             IntArray(
-                INPUT_SIZE *
-                        INPUT_SIZE
+                INPUT_SIZE * INPUT_SIZE
             )
 
         bitmap.getPixels(
@@ -408,17 +437,11 @@ class BlazeFaceDetector(
         val buffer =
             FloatBuffer.allocate(
                 3 *
-                        INPUT_SIZE *
-                        INPUT_SIZE
+                    INPUT_SIZE *
+                    INPUT_SIZE
             )
 
-        /*
-         * BlazeFace input:
-         *
-         * RGB
-         * CHW
-         * [-1, 1]
-         */
+        // CHW RGB, normalized to [-1, 1].
         for (channel in 0..2) {
 
             for (pixel in pixels) {
@@ -436,11 +459,14 @@ class BlazeFaceDetector(
                             pixel and 0xFF
                     }
 
-                buffer.put(
+                val normalized =
                     (
                         value.toFloat() -
-                                127.5f
+                            127.5f
                         ) / 127.5f
+
+                buffer.put(
+                    normalized
                 )
             }
         }
@@ -450,6 +476,10 @@ class BlazeFaceDetector(
         return buffer
     }
 
+    // ================================================================
+    // OUTPUT PARSER
+    // ================================================================
+
     private fun extractFloat2D(
         raw: Any
     ): Array<FloatArray> {
@@ -458,42 +488,48 @@ class BlazeFaceDetector(
 
             is Array<*> -> {
 
-                val first =
-                    raw.firstOrNull()
+                if (raw.isEmpty()) {
+                    emptyArray()
+                } else {
 
-                when (first) {
+                    val first =
+                        raw.firstOrNull()
 
-                    is Array<*> -> {
+                    when (first) {
 
-                        first.mapNotNull { row ->
+                        is Array<*> -> {
 
-                            when (row) {
+                            first.mapNotNull { row ->
 
-                                is FloatArray ->
-                                    row
+                                when (row) {
 
-                                is DoubleArray ->
-                                    FloatArray(
-                                        row.size
-                                    ) {
-                                        row[it]
-                                            .toFloat()
-                                    }
+                                    is FloatArray ->
+                                        row
 
-                                else ->
-                                    null
-                            }
+                                    is DoubleArray ->
+                                        FloatArray(
+                                            row.size
+                                        ) { index ->
+                                            row[index].toFloat()
+                                        }
 
-                        }.toTypedArray()
+                                    else ->
+                                        null
+                                }
+
+                            }.toTypedArray()
+                        }
+
+                        is FloatArray -> {
+
+                            raw.mapNotNull { item ->
+                                item as? FloatArray
+                            }.toTypedArray()
+                        }
+
+                        else ->
+                            emptyArray()
                     }
-
-                    is FloatArray ->
-                        raw.mapNotNull {
-                            it as? FloatArray
-                        }.toTypedArray()
-
-                    else ->
-                        emptyArray()
                 }
             }
 
@@ -505,20 +541,28 @@ class BlazeFaceDetector(
         }
     }
 
+    // ================================================================
+    // SIGMOID
+    // ================================================================
+
     private fun sigmoid(
         value: Float
     ): Float {
 
         return (
             1.0 /
-                    (
-                        1.0 +
-                                exp(
-                                    -value.toDouble()
-                                )
-                    )
+                (
+                    1.0 +
+                        exp(
+                            -value.toDouble()
+                        )
+                )
             ).toFloat()
     }
+
+    // ================================================================
+    // LETTERBOX -> ORIGINAL IMAGE
+    // ================================================================
 
     private fun unletterbox(
         value: Float,
@@ -527,17 +571,22 @@ class BlazeFaceDetector(
         maximum: Float
     ): Float {
 
-        return (
+        val pixel =
             (
                 value *
-                        INPUT_SIZE -
-                        padding
+                    INPUT_SIZE.toFloat() -
+                    padding
                 ) / scale
-            ).coerceIn(
-                0f,
-                maximum
-            )
+
+        return pixel.coerceIn(
+            0f,
+            maximum
+        )
     }
+
+    // ================================================================
+    // WEIGHTED NMS
+    // ================================================================
 
     private fun weightedNms(
         detections: List<Detection>
@@ -588,17 +637,15 @@ class BlazeFaceDetector(
 
             var totalWeight = 0f
 
-            var x1 = 0f
-            var y1 = 0f
-            var x2 = 0f
-            var y2 = 0f
+            var weightedX1 = 0f
+            var weightedY1 = 0f
+            var weightedX2 = 0f
+            var weightedY2 = 0f
 
-            var score = 0f
+            var bestScore = 0f
 
             val keypointSums =
-                Array(
-                    KEYPOINT_COUNT
-                ) {
+                Array(KEYPOINT_COUNT) {
                     floatArrayOf(
                         0f,
                         0f
@@ -612,25 +659,21 @@ class BlazeFaceDetector(
 
                 totalWeight += weight
 
-                x1 +=
-                    detection.x1 *
-                            weight
+                weightedX1 +=
+                    detection.x1 * weight
 
-                y1 +=
-                    detection.y1 *
-                            weight
+                weightedY1 +=
+                    detection.y1 * weight
 
-                x2 +=
-                    detection.x2 *
-                            weight
+                weightedX2 +=
+                    detection.x2 * weight
 
-                y2 +=
-                    detection.y2 *
-                            weight
+                weightedY2 +=
+                    detection.y2 * weight
 
-                score =
+                bestScore =
                     max(
-                        score,
+                        bestScore,
                         detection.score
                     )
 
@@ -638,36 +681,50 @@ class BlazeFaceDetector(
 
                     keypointSums[k][0] +=
                         detection.keypoints[k][0] *
-                                weight
+                        weight
 
                     keypointSums[k][1] +=
                         detection.keypoints[k][1] *
-                                weight
+                        weight
                 }
             }
 
+            if (totalWeight <= 0f) {
+                continue
+            }
+
             val averagedKeypoints =
-                Array(
-                    KEYPOINT_COUNT
-                ) { k ->
+                Array(KEYPOINT_COUNT) { k ->
 
                     floatArrayOf(
-
                         keypointSums[k][0] /
-                                totalWeight,
+                            totalWeight,
 
                         keypointSums[k][1] /
-                                totalWeight
+                            totalWeight
                     )
                 }
 
             output.add(
                 Detection(
-                    score = score,
-                    x1 = x1 / totalWeight,
-                    y1 = y1 / totalWeight,
-                    x2 = x2 / totalWeight,
-                    y2 = y2 / totalWeight,
+                    score = bestScore,
+
+                    x1 =
+                        weightedX1 /
+                            totalWeight,
+
+                    y1 =
+                        weightedY1 /
+                            totalWeight,
+
+                    x2 =
+                        weightedX2 /
+                            totalWeight,
+
+                    y2 =
+                        weightedY2 /
+                            totalWeight,
+
                     keypoints =
                         averagedKeypoints
                 )
@@ -676,6 +733,10 @@ class BlazeFaceDetector(
 
         return output
     }
+
+    // ================================================================
+    // IOU
+    // ================================================================
 
     private fun iou(
         a: Detection,
@@ -726,32 +787,36 @@ class BlazeFaceDetector(
                 0f,
                 a.x2 - a.x1
             ) *
-                    max(
-                        0f,
-                        a.y2 - a.y1
-                    )
+                max(
+                    0f,
+                    a.y2 - a.y1
+                )
 
         val areaB =
             max(
                 0f,
                 b.x2 - b.x1
             ) *
-                    max(
-                        0f,
-                        b.y2 - b.y1
-                    )
+                max(
+                    0f,
+                    b.y2 - b.y1
+                )
 
         val union =
             areaA +
-                    areaB -
-                    intersection
+                areaB -
+                intersection
 
-        return if (union <= 0f) {
-            0f
-        } else {
-            intersection / union
+        if (union <= 0f) {
+            return 0f
         }
+
+        return intersection / union
     }
+
+    // ================================================================
+    // INTERNAL DETECTION
+    // ================================================================
 
     private data class Detection(
         val score: Float,
