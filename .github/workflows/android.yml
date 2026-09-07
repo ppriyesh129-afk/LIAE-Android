@@ -12,6 +12,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
+
       - name: Checkout LIAE-Android
         uses: actions/checkout@v4
 
@@ -27,12 +28,21 @@ jobs:
           gradle-version: "8.7"
 
       - name: Generate Gradle Wrapper
-        run: gradle wrapper --gradle-version 8.7
+        run: |
+          gradle wrapper --gradle-version 8.7
+
+      # ============================================
+      # DOWNLOAD FULL LIAE MODEL
+      # ============================================
 
       - name: Download Full LIAE ONNX
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          echo "========================================"
+          echo "DOWNLOADING FULL LIAE ONNX"
+          echo "========================================"
+
           mkdir -p /tmp/liae_artifact
 
           gh run download 34077791427 \
@@ -40,7 +50,17 @@ jobs:
             --name LIAE_128_80_48_16_FP32_ONNX_FULL \
             --dir /tmp/liae_artifact
 
-      - name: Verify ONNX
+          echo
+          echo "Downloaded files:"
+          find /tmp/liae_artifact \
+            -type f \
+            -printf '%p %s bytes\n'
+
+      # ============================================
+      # VERIFY LIAE
+      # ============================================
+
+      - name: Verify LIAE ONNX
         run: |
           MODEL="/tmp/liae_artifact/LIAE_128_80_48_16_fp32.onnx"
 
@@ -48,39 +68,141 @@ jobs:
 
           SIZE=$(stat -c%s "$MODEL")
 
-          echo "Model size: $SIZE bytes"
+          echo "LIAE model size: $SIZE bytes"
 
           if [ "$SIZE" -lt 10000000 ]; then
-            echo "Invalid ONNX"
+            echo "ERROR: LIAE model is suspiciously small"
             exit 1
           fi
 
-      - name: Verify Graph
+          echo "✓ FULL LIAE ONNX FOUND"
+
+      # ============================================
+      # VERIFY GRAPH
+      # ============================================
+
+      - name: Verify LIAE Graph
         env:
           MODEL: /tmp/liae_artifact/LIAE_128_80_48_16_fp32.onnx
         run: |
-          python -m pip install --disable-pip-version-check onnx==1.16.2
+          python -m pip install \
+            --disable-pip-version-check \
+            "onnx==1.16.2"
 
           python - <<'PY'
           import os
           import onnx
 
-          model = onnx.load(os.environ["MODEL"])
+          path = os.environ["MODEL"]
 
-          print("Inputs:", [i.name for i in model.graph.input])
-          print("Outputs:", [o.name for o in model.graph.output])
+          model = onnx.load(path)
+
+          inputs = [x.name for x in model.graph.input]
+          outputs = [x.name for x in model.graph.output]
+
+          print("========================================")
+          print("LIAE GRAPH")
+          print("========================================")
+
+          print("Inputs :", inputs)
+          print("Outputs:", outputs)
+
+          if set(inputs) != {"src", "dst"}:
+              raise RuntimeError(
+                  "Unexpected inputs: " + str(inputs)
+              )
+
+          print()
+          print("✓ LIAE INPUTS VERIFIED")
           PY
 
-      - name: Install Model into Assets
+      # ============================================
+      # INSTALL LIAE
+      # ============================================
+
+      - name: Install LIAE Model into Assets
         run: |
+          echo "========================================"
+          echo "INSTALLING LIAE MODEL"
+          echo "========================================"
+
           mkdir -p app/src/main/assets
 
           cp \
             /tmp/liae_artifact/LIAE_128_80_48_16_fp32.onnx \
             app/src/main/assets/LIAE_128_80_48_16_fp32.onnx
 
+          ls -lh \
+            app/src/main/assets/LIAE_128_80_48_16_fp32.onnx
+
+          echo "✓ LIAE INSTALLED"
+
+      # ============================================
+      # DOWNLOAD YUNET
+      # ============================================
+
+      - name: Download YuNet Face Detector
+        run: |
+          echo "========================================"
+          echo "DOWNLOADING YUNET"
+          echo "========================================"
+
+          mkdir -p app/src/main/assets
+
+          wget \
+            --no-verbose \
+            --output-document \
+            app/src/main/assets/face_detection_yunet_2023mar.onnx \
+            "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
+
+          test -f \
+            app/src/main/assets/face_detection_yunet_2023mar.onnx
+
+          SIZE=$(stat -c%s \
+            app/src/main/assets/face_detection_yunet_2023mar.onnx)
+
+          echo "YuNet size: $SIZE bytes"
+
+          if [ "$SIZE" -lt 100000 ]; then
+            echo "ERROR: YuNet model download failed"
+            exit 1
+          fi
+
+          echo "✓ YUNET DOWNLOADED"
+
+      # ============================================
+      # VERIFY BOTH MODELS
+      # ============================================
+
+      - name: Verify Android Model Assets
+        run: |
+          echo "========================================"
+          echo "ANDROID MODEL ASSETS"
+          echo "========================================"
+
+          ls -lh app/src/main/assets/
+
+          echo
+
+          test -f \
+            app/src/main/assets/LIAE_128_80_48_16_fp32.onnx
+
+          test -f \
+            app/src/main/assets/face_detection_yunet_2023mar.onnx
+
+          echo "✓ LIAE MODEL PRESENT"
+          echo "✓ YUNET MODEL PRESENT"
+
+      # ============================================
+      # BUILD APK
+      # ============================================
+
       - name: Build Debug APK
         run: |
+          echo "========================================"
+          echo "BUILDING APK"
+          echo "========================================"
+
           chmod +x gradlew
 
           ./gradlew \
@@ -88,8 +210,30 @@ jobs:
             --stacktrace \
             assembleDebug
 
+      # ============================================
+      # VERIFY APK
+      # ============================================
+
+      - name: Check APK
+        run: |
+          echo "========================================"
+          echo "APK"
+          echo "========================================"
+
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+
+          test -f "$APK"
+
+          ls -lh "$APK"
+
+          echo "✓ APK BUILD SUCCESSFUL"
+
+      # ============================================
+      # UPLOAD APK
+      # ============================================
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: LIAE-Android-debug-FULL-ONNX
+          name: LIAE-Android-debug-FACE-DETECTOR
           path: app/build/outputs/apk/debug/app-debug.apk
