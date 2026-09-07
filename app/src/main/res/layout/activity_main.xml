@@ -1,44 +1,41 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="20dp">
 
-    <LinearLayout
-        android:layout_width="match_parent"
+    <TextView
+        android:id="@+id/statusText"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="16dp">
+        android:text="Select Source Face"
+        android:textSize="18sp"
+        android:layout_marginBottom="20dp" />
 
-        <TextView
-            android:id="@+id/statusText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Ready"
-            android:textSize="16sp"
-            android:paddingBottom="16dp" />
+    <Button
+        android:id="@+id/sourceButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Select Source Image" />
 
-        <Button
-            android:id="@+id/sourceButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Select Source Face" />
+    <Button
+        android:id="@+id/targetButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Select Target Image"
+        android:layout_marginTop="12dp" />
 
-        <Button
-            android:id="@+id/targetButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="Select Target Face" />
+    <ImageView
+        android:id="@+id/resultImage"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="20dp"
+        android:scaleType="fitCenter"
+        android:adjustViewBounds="true" />
 
-        <ImageView
-            android:id="@+id/resultImage"
-            android:layout_width="match_parent"
-            android:layout_height="400dp"
-            android:layout_marginTop="20dp"
-            android:adjustViewBounds="true"
-            android:scaleType="fitCenter"
-            android:background="#222222" />
-
-    </LinearLayout>
-
-</ScrollView>
+</LinearLayout>
