@@ -11,137 +11,63 @@ object DflMerger {
         warpedMask: Bitmap
     ): Bitmap {
 
-        require(
-            background.width ==
-                warpedFace.width
-        )
+        require(background.width == warpedFace.width)
+        require(background.height == warpedFace.height)
+        require(background.width == warpedMask.width)
+        require(background.height == warpedMask.height)
 
-        require(
-            background.height ==
-                warpedFace.height
-        )
+        val w = background.width
+        val h = background.height
 
-        require(
-            background.width ==
-                warpedMask.width
-        )
+        val backgroundPixels = IntArray(w * h)
+        val facePixels = IntArray(w * h)
+        val maskPixels = IntArray(w * h)
+        val outputPixels = IntArray(w * h)
 
-        require(
-            background.height ==
-                warpedMask.height
-        )
-
-        val w =
-            background.width
-
-        val h =
-            background.height
-
-        val backgroundPixels =
-            IntArray(w * h)
-
-        val facePixels =
-            IntArray(w * h)
-
-        val maskPixels =
-            IntArray(w * h)
-
-        val outputPixels =
-            IntArray(w * h)
-
-        background.getPixels(
-            backgroundPixels,
-            0,
-            w,
-            0,
-            0,
-            w,
-            h
-        )
-
-        warpedFace.getPixels(
-            facePixels,
-            0,
-            w,
-            0,
-            0,
-            w,
-            h
-        )
-
-        warpedMask.getPixels(
-            maskPixels,
-            0,
-            w,
-            0,
-            0,
-            w,
-            h
-        )
+        background.getPixels(backgroundPixels, 0, w, 0, 0, w, h)
+        warpedFace.getPixels(facePixels, 0, w, 0, 0, w, h)
+        warpedMask.getPixels(maskPixels, 0, w, 0, 0, w, h)
 
         for (i in outputPixels.indices) {
 
-            val bgPixel =
-                backgroundPixels[i]
-
-            val facePixel =
-                facePixels[i]
-
-            /*
-             * Mask is stored as:
-             *
-             * R = mask
-             * G = mask
-             * B = mask
-             * A = 255
-             *
-             * Therefore reading RED is correct.
-             */
             val maskAlpha =
-                Color.red(
-                    maskPixels[i]
-                ) / 255f
+                (Color.red(maskPixels[i]) / 255f)
+                    .coerceIn(0f, 1f)
 
-            val inverseMask =
-                1f - maskAlpha
+            when {
+                maskAlpha <= 0f -> {
+                    outputPixels[i] = backgroundPixels[i]
+                }
 
-            val r =
-                (
-                    Color.red(bgPixel) *
-                        inverseMask +
-                    Color.red(facePixel) *
-                        maskAlpha
-                )
-                    .toInt()
-                    .coerceIn(0, 255)
+                maskAlpha >= 1f -> {
+                    outputPixels[i] = facePixels[i]
+                }
 
-            val g =
-                (
-                    Color.green(bgPixel) *
-                        inverseMask +
-                    Color.green(facePixel) *
-                        maskAlpha
-                )
-                    .toInt()
-                    .coerceIn(0, 255)
+                else -> {
 
-            val b =
-                (
-                    Color.blue(bgPixel) *
-                        inverseMask +
-                    Color.blue(facePixel) *
-                        maskAlpha
-                )
-                    .toInt()
-                    .coerceIn(0, 255)
+                    val bgPixel = backgroundPixels[i]
+                    val facePixel = facePixels[i]
 
-            outputPixels[i] =
-                Color.argb(
-                    255,
-                    r,
-                    g,
-                    b
-                )
+                    val inv = 1f - maskAlpha
+
+                    val r = (
+                        Color.red(bgPixel) * inv +
+                        Color.red(facePixel) * maskAlpha
+                    ).toInt().coerceIn(0, 255)
+
+                    val g = (
+                        Color.green(bgPixel) * inv +
+                        Color.green(facePixel) * maskAlpha
+                    ).toInt().coerceIn(0, 255)
+
+                    val b = (
+                        Color.blue(bgPixel) * inv +
+                        Color.blue(facePixel) * maskAlpha
+                    ).toInt().coerceIn(0, 255)
+
+                    outputPixels[i] = Color.argb(255, r, g, b)
+                }
+            }
         }
 
         return Bitmap.createBitmap(
