@@ -40,7 +40,8 @@ class LiaeUdEngine(context: Context) {
 
     fun run(src: FloatArray, dst: FloatArray): Result {
 
-        val shape = longArrayOf(1, SIZE.toLong(), SIZE.toLong(), 3)
+        // DeepFaceLab LIAE uses NCHW
+        val shape = longArrayOf(1, 3, SIZE.toLong(), SIZE.toLong())
 
         val srcTensor = OnnxTensor.createTensor(
             env,
@@ -75,18 +76,17 @@ class LiaeUdEngine(context: Context) {
 
     private fun flatten(value: Any): FloatArray {
 
-        val list = ArrayList<Float>()
+        val out = ArrayList<Float>()
 
         fun walk(v: Any?) {
             when (v) {
-                is FloatArray -> list.addAll(v.toList())
+                is FloatArray -> out.addAll(v.toList())
                 is Array<*> -> v.forEach { walk(it) }
             }
         }
 
         walk(value)
-
-        return list.toFloatArray()
+        return out.toFloatArray()
     }
 
     fun close() {
