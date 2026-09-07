@@ -140,7 +140,8 @@ class MainActivity : AppCompatActivity() {
 
         targetButton.isEnabled = false
 
-        statusText.text = "Select source face"
+        statusText.text =
+            "Select source face"
 
         sourceButton.setOnClickListener {
 
@@ -202,30 +203,41 @@ class MainActivity : AppCompatActivity() {
             if (pipeline == null) {
 
                 val modelFile =
-                    getFileStreamPath("blazeface.onnx")
+                    getFileStreamPath(
+                        "blazeface.onnx"
+                    )
 
                 if (!modelFile.exists()) {
 
-                    assets.open("blazeface.onnx").use { input ->
+                    assets
+                        .open("blazeface.onnx")
+                        .use { input ->
 
-                        modelFile.outputStream().use { output ->
+                            modelFile
+                                .outputStream()
+                                .use { output ->
 
-                            input.copyTo(output)
+                                    input.copyTo(output)
+                                }
                         }
-                    }
                 }
 
                 val env =
-                    OrtEnvironment.getEnvironment()
+                    OrtEnvironment
+                        .getEnvironment()
 
                 val blazeSession =
                     env.createSession(
                         modelFile.absolutePath,
-                        ai.onnxruntime.OrtSession.SessionOptions()
+                        ai.onnxruntime
+                            .OrtSession
+                            .SessionOptions()
                     )
 
                 val detector =
-                    BlazeFaceDetector(blazeSession)
+                    BlazeFaceDetector(
+                        blazeSession
+                    )
 
                 val liae =
                     LiaeUdEngine(this)
@@ -267,9 +279,16 @@ class MainActivity : AppCompatActivity() {
                     result.bitmap
                 )
 
+                /*
+                 * Show LIAE diagnostic information
+                 * directly on the phone screen.
+                 */
                 statusText.text =
                     "Face swap complete\n" +
-                        "Faces detected: ${result.facesDetected}"
+                    "Faces detected: " +
+                    result.facesDetected +
+                    "\n\n" +
+                    result.debugText
 
                 sourceButton.isEnabled = true
                 targetButton.isEnabled = true
@@ -283,9 +302,9 @@ class MainActivity : AppCompatActivity() {
 
                 statusText.text =
                     "FACE SWAP ERROR\n\n" +
-                        e.javaClass.simpleName +
-                        "\n" +
-                        (e.message ?: "Unknown error")
+                    e.javaClass.simpleName +
+                    "\n" +
+                    (e.message ?: "Unknown error")
 
                 sourceButton.isEnabled = true
                 targetButton.isEnabled = true
