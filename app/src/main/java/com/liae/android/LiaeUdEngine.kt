@@ -40,8 +40,13 @@ class LiaeUdEngine(context: Context) {
 
     fun run(src: FloatArray, dst: FloatArray): Result {
 
-        // DeepFaceLab LIAE uses NCHW
-        val shape = longArrayOf(1, 3, SIZE.toLong(), SIZE.toLong())
+        // DeepFaceLab LIAE ONNX expects NHWC: (1,128,128,3)
+        val shape = longArrayOf(
+            1,
+            SIZE.toLong(),
+            SIZE.toLong(),
+            3
+        )
 
         val srcTensor = OnnxTensor.createTensor(
             env,
