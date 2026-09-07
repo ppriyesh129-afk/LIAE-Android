@@ -177,7 +177,7 @@ class YuNetDetector(
                  */
 
                 val outputCount =
-                    result.size
+                    result.size()
 
                 val firstOutput =
                     result[0]
