@@ -1,164 +1,95 @@
 package com.liae.android
 
-import android.graphics.Bitmap
-import android.graphics.Color
+import ai.onnxruntime.OnnxTensor
+import ai.onnxruntime.OrtEnvironment
+import ai.onnxruntime.OrtSession
+import android.content.Context
+import java.nio.FloatBuffer
 
-object ImageTensor {
+class LiaeUdEngine(context: Context) {
 
-    private const val SIZE = 128
-    private const val CHANNELS = 3
-
-    /**
-     * Converts any Bitmap into a 128x128 float tensor (NHWC layout).
-     * Values are normalized to 0.0..1.0.
-     */
-    fun bitmapToTensor(bitmap: Bitmap): FloatArray {
-
-        val resized = Bitmap.createScaledBitmap(
-            bitmap,
-            SIZE,
-            SIZE,
-            true
-        )
-
-        val pixels = IntArray(SIZE * SIZE)
-        resized.getPixels(
-            pixels,
-            0,
-            SIZE,
-            0,
-            0,
-            SIZE,
-            SIZE
-        )
-
-        val tensor = FloatArray(SIZE * SIZE * CHANNELS)
-
-        var p = 0
-        var i = 0
-
-        while (i < pixels.size) {
-
-            val c = pixels[i]
-
-            tensor[p++] = Color.red(c) / 255f
-            tensor[p++] = Color.green(c) / 255f
-            tensor[p++] = Color.blue(c) / 255f
-
-            i++
-        }
-
-        if (resized != bitmap) {
-            resized.recycle()
-        }
-
-        return tensor
+    companion object {
+        private const val MODEL_NAME = "LIAE_128_80_48_16_fp32.onnx"
+        private const val SIZE = 128
     }
 
-    /**
-     * Converts the ONNX RGB output back into a Bitmap.
-     * Handles values in both 0..1 and -1..1 ranges.
-     */
-    fun tensorToBitmap(rgb: FloatArray): Bitmap {
+    data class Result(
+        val rgb: FloatArray,
+        val mask: FloatArray
+    )
 
-        require(rgb.size >= SIZE * SIZE * CHANNELS) {
-            "RGB tensor is too small: ${rgb.size}"
-        }
+    private val env = OrtEnvironment.getEnvironment()
+    private val session: OrtSession
 
-        val bitmap = Bitmap.createBitmap(
-            SIZE,
-            SIZE,
-            Bitmap.Config.ARGB_8888
-        )
+    init {
+        val modelFile = context.getFileStreamPath(MODEL_NAME)
 
-        val pixels = IntArray(SIZE * SIZE)
-
-        var p = 0
-
-        for (i in pixels.indices) {
-
-            var r = rgb[p++]
-            var g = rgb[p++]
-            var b = rgb[p++]
-
-            // Support both [-1,1] and [0,1] model outputs.
-            if (r < 0f || g < 0f || b < 0f) {
-                r = (r + 1f) * 0.5f
-                g = (g + 1f) * 0.5f
-                b = (b + 1f) * 0.5f
+        if (!modelFile.exists()) {
+            context.assets.open(MODEL_NAME).use { input ->
+                modelFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
             }
-
-            val rr = (r.coerceIn(0f, 1f) * 255f).toInt()
-            val gg = (g.coerceIn(0f, 1f) * 255f).toInt()
-            val bb = (b.coerceIn(0f, 1f) * 255f).toInt()
-
-            pixels[i] = Color.argb(
-                255,
-                rr,
-                gg,
-                bb
-            )
         }
 
-        bitmap.setPixels(
-            pixels,
-            0,
-            SIZE,
-            0,
-            0,
-            SIZE,
-            SIZE
+        session = env.createSession(
+            modelFile.absolutePath,
+            OrtSession.SessionOptions()
         )
-
-        return bitmap
     }
 
-    /**
-     * Converts a mask tensor into a grayscale Bitmap for debugging.
-     */
-    fun maskToBitmap(mask: FloatArray): Bitmap {
+    fun run(src: FloatArray, dst: FloatArray): Result {
 
-        require(mask.size >= SIZE * SIZE) {
-            "Mask tensor is too small: ${mask.size}"
-        }
+        // DeepFaceLab LIAE uses NCHW
+        val shape = longArrayOf(1, 3, SIZE.toLong(), SIZE.toLong())
 
-        val bitmap = Bitmap.createBitmap(
-            SIZE,
-            SIZE,
-            Bitmap.Config.ARGB_8888
+        val srcTensor = OnnxTensor.createTensor(
+            env,
+            FloatBuffer.wrap(src),
+            shape
         )
 
-        val pixels = IntArray(SIZE * SIZE)
+        val dstTensor = OnnxTensor.createTensor(
+            env,
+            FloatBuffer.wrap(dst),
+            shape
+        )
 
-        for (i in pixels.indices) {
+        return try {
+            session.run(
+                mapOf(
+                    "src" to srcTensor,
+                    "dst" to dstTensor
+                )
+            ).use { outputs ->
 
-            var v = mask[i]
+                val rgb = flatten(outputs[0].value)
+                val mask = flatten(outputs[1].value)
 
-            if (v < 0f) {
-                v = (v + 1f) * 0.5f
+                Result(rgb, mask)
             }
+        } finally {
+            srcTensor.close()
+            dstTensor.close()
+        }
+    }
 
-            val gray =
-                (v.coerceIn(0f, 1f) * 255f).toInt()
+    private fun flatten(value: Any): FloatArray {
 
-            pixels[i] = Color.argb(
-                255,
-                gray,
-                gray,
-                gray
-            )
+        val out = ArrayList<Float>()
+
+        fun walk(v: Any?) {
+            when (v) {
+                is FloatArray -> out.addAll(v.toList())
+                is Array<*> -> v.forEach { walk(it) }
+            }
         }
 
-        bitmap.setPixels(
-            pixels,
-            0,
-            SIZE,
-            0,
-            0,
-            SIZE,
-            SIZE
-        )
+        walk(value)
+        return out.toFloatArray()
+    }
 
-        return bitmap
+    fun close() {
+        session.close()
     }
 }
