@@ -30,25 +30,20 @@ class LiaeUdEngine(context: Context) {
 
     init {
 
-        val modelFile =
-            context.getFileStreamPath(MODEL_NAME)
+        val modelFile = context.getFileStreamPath(MODEL_NAME)
 
         if (!modelFile.exists()) {
-
             context.assets.open(MODEL_NAME).use { input ->
-
                 modelFile.outputStream().use { output ->
-
                     input.copyTo(output)
                 }
             }
         }
 
-        session =
-            env.createSession(
-                modelFile.absolutePath,
-                OrtSession.SessionOptions()
-            )
+        session = env.createSession(
+            modelFile.absolutePath,
+            OrtSession.SessionOptions()
+        )
     }
 
     fun run(
@@ -64,27 +59,24 @@ class LiaeUdEngine(context: Context) {
             "Target tensor size must be ${SIZE * SIZE * 3}, got ${dst.size}"
         }
 
-        val inputShape =
-            longArrayOf(
-                1,
-                SIZE.toLong(),
-                SIZE.toLong(),
-                3
-            )
+        val inputShape = longArrayOf(
+            1,
+            SIZE.toLong(),
+            SIZE.toLong(),
+            3
+        )
 
-        val srcTensor =
-            OnnxTensor.createTensor(
-                env,
-                FloatBuffer.wrap(src),
-                inputShape
-            )
+        val srcTensor = OnnxTensor.createTensor(
+            env,
+            FloatBuffer.wrap(src),
+            inputShape
+        )
 
-        val dstTensor =
-            OnnxTensor.createTensor(
-                env,
-                FloatBuffer.wrap(dst),
-                inputShape
-            )
+        val dstTensor = OnnxTensor.createTensor(
+            env,
+            FloatBuffer.wrap(dst),
+            inputShape
+        )
 
         return try {
 
@@ -96,16 +88,13 @@ class LiaeUdEngine(context: Context) {
             ).use { outputs ->
 
                 val rgbTensor =
-                    outputs["output_1"] as OnnxTensor
+                    outputs["output_1"]!!.get() as OnnxTensor
 
                 val maskTensor =
-                    outputs["output_2"] as OnnxTensor
+                    outputs["output_2"]!!.get() as OnnxTensor
 
-                lastRgbShape =
-                    rgbTensor.info.shape
-
-                lastMaskShape =
-                    maskTensor.info.shape
+                lastRgbShape = rgbTensor.info.shape
+                lastMaskShape = maskTensor.info.shape
 
                 Log.d(
                     "LIAE",
@@ -117,11 +106,8 @@ class LiaeUdEngine(context: Context) {
                     "Mask shape = ${lastMaskShape.contentToString()}"
                 )
 
-                val rgb =
-                    flatten(rgbTensor.value)
-
-                val mask =
-                    flatten(maskTensor.value)
+                val rgb = flatten(rgbTensor.value)
+                val mask = flatten(maskTensor.value)
 
                 require(rgb.size == SIZE * SIZE * 3) {
                     "Unexpected RGB size: ${rgb.size}"
@@ -144,35 +130,23 @@ class LiaeUdEngine(context: Context) {
         }
     }
 
-    private fun flatten(
-        value: Any
-    ): FloatArray {
+    private fun flatten(value: Any): FloatArray {
 
-        val out =
-            ArrayList<Float>()
+        val out = ArrayList<Float>()
 
         fun walk(v: Any?) {
-
             when (v) {
-
                 is FloatArray -> {
-
-                    for (f in v) {
-                        out.add(f)
-                    }
+                    for (f in v) out.add(f)
                 }
 
                 is Array<*> -> {
-
-                    for (child in v) {
-                        walk(child)
-                    }
+                    for (child in v) walk(child)
                 }
             }
         }
 
         walk(value)
-
         return out.toFloatArray()
     }
 
