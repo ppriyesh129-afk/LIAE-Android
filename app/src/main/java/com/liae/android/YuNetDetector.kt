@@ -131,15 +131,18 @@ class YuNetDetector(
                 val position =
                     y * INPUT_SIZE + x
 
-                input[position] = b
+                input[position] =
+                    b
 
                 input[
                     planeSize + position
-                ] = g
+                ] =
+                    g
 
                 input[
                     planeSize * 2 + position
-                ] = r
+                ] =
+                    r
             }
         }
 
@@ -170,23 +173,8 @@ class YuNetDetector(
                 )
             ).use { result ->
 
-                /*
-                 * DIAGNOSTIC ONLY
-                 *
-                 * Do not parse the output yet.
-                 */
-
                 val outputCount =
                     result.size()
-
-                val firstOutput =
-                    result[0]
-
-                val value =
-                    firstOutput.value
-
-                val tensorInfo =
-                    firstOutput.info
 
                 val message =
                     buildString {
@@ -199,37 +187,56 @@ class YuNetDetector(
                             "Output count: $outputCount"
                         )
 
-                        appendLine(
-                            "Output 0 type: " +
-                                value.javaClass.name
-                        )
+                        for (
+                            i in 0 until outputCount
+                        ) {
 
-                        appendLine(
-                            "Output 0 info: " +
-                                tensorInfo.toString()
-                        )
+                            val output =
+                                result[i]
 
-                        when (value) {
+                            val value =
+                                output.value
 
-                            is FloatArray -> {
+                            appendLine()
 
-                                appendLine(
-                                    "FloatArray size: " +
-                                        value.size
-                                )
-                            }
+                            appendLine(
+                                "OUTPUT $i"
+                            )
 
-                            is Array<*> -> {
+                            appendLine(
+                                "Type: " +
+                                    value.javaClass.name
+                            )
 
-                                appendLine(
-                                    "Array outer size: " +
-                                        value.size
-                                )
+                            appendLine(
+                                "Info: " +
+                                    output.info.toString()
+                            )
 
-                                appendLine(
-                                    "Array value: " +
-                                        describeArray(value)
-                                )
+                            when (value) {
+
+                                is FloatArray -> {
+
+                                    appendLine(
+                                        "FloatArray size: " +
+                                            value.size
+                                    )
+                                }
+
+                                is Array<*> -> {
+
+                                    appendLine(
+                                        "Array outer size: " +
+                                            value.size
+                                    )
+
+                                    appendLine(
+                                        "Array shape: " +
+                                            describeArray(
+                                                value
+                                            )
+                                    )
+                                }
                             }
                         }
                     }
@@ -262,10 +269,14 @@ class YuNetDetector(
                 "[${value.size}, ${first.size}]"
 
             is Array<*> ->
-                "[${value.size}, ${describeArray(first)}]"
+                "[${value.size}, ${
+                    describeArray(first)
+                }]"
 
             else ->
-                "[${value.size}, ${first?.javaClass?.name}]"
+                "[${value.size}, ${
+                    first?.javaClass?.name
+                }]"
         }
     }
 
