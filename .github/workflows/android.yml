@@ -32,20 +32,20 @@ jobs:
           gradle wrapper --gradle-version 8.7
 
       # ============================================
-      # DOWNLOAD FULL LIAE MODEL
+      # DOWNLOAD VERIFIED LIAE MODEL
       # ============================================
 
-      - name: Download Full LIAE ONNX
+      - name: Download Verified LIAE ONNX
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           echo "========================================"
-          echo "DOWNLOADING FULL LIAE ONNX"
+          echo "DOWNLOADING VERIFIED LIAE ONNX"
           echo "========================================"
 
           mkdir -p /tmp/liae_artifact
 
-          gh run download 34077791427 \
+          gh run download 34130535230 \
             --repo ppriyesh129-afk/SAEHD-Android \
             --name LIAE_128_80_48_16_FP32_ONNX_FULL \
             --dir /tmp/liae_artifact
@@ -55,7 +55,7 @@ jobs:
           find /tmp/liae_artifact -type f -printf '%p %s bytes\n'
 
       # ============================================
-      # VERIFY LIAE
+      # VERIFY MODEL SIZE
       # ============================================
 
       - name: Verify LIAE ONNX
@@ -83,9 +83,7 @@ jobs:
         env:
           MODEL: /tmp/liae_artifact/LIAE_128_80_48_16_fp32.onnx
         run: |
-          python -m pip install \
-            --disable-pip-version-check \
-            "onnx==1.16.2"
+          python -m pip install --disable-pip-version-check onnx==1.16.2
 
           python - <<'PY'
           import os
@@ -97,22 +95,33 @@ jobs:
           outputs = [x.name for x in model.graph.output]
 
           print("========================================")
-          print("LIAE GRAPH")
+          print("VERIFIED LIAE GRAPH")
           print("========================================")
           print("Inputs :", inputs)
           print("Outputs:", outputs)
 
-          if set(inputs) != {"src", "dst"}:
+          if inputs != ["in_face"]:
               raise RuntimeError(
                   "Unexpected inputs: " + str(inputs)
               )
 
+          expected = [
+              "output_1",
+              "output_2",
+              "output_3"
+          ]
+
+          if outputs != expected:
+              raise RuntimeError(
+                  "Unexpected outputs: " + str(outputs)
+              )
+
           print()
-          print("✓ LIAE INPUTS VERIFIED")
+          print("✓ VERIFIED 1-INPUT / 3-OUTPUT MODEL")
           PY
 
       # ============================================
-      # INSTALL LIAE
+      # INSTALL MODEL INTO ASSETS
       # ============================================
 
       - name: Install LIAE Model into Assets
@@ -161,7 +170,7 @@ jobs:
           echo "✓ BLAZEFACE DOWNLOADED"
 
       # ============================================
-      # VERIFY BOTH MODELS
+      # VERIFY ASSETS
       # ============================================
 
       - name: Verify Android Model Assets
@@ -171,8 +180,6 @@ jobs:
           echo "========================================"
 
           ls -lh app/src/main/assets/
-
-          echo
 
           test -f app/src/main/assets/LIAE_128_80_48_16_fp32.onnx
           test -f app/src/main/assets/blazeface.onnx
