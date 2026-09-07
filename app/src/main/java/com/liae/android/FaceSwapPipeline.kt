@@ -12,16 +12,23 @@ class FaceSwapPipeline(
 
     data class Result(
         val bitmap: Bitmap,
-        val facesDetected: Int
+        val facesDetected: Int,
+        val debugText: String
     )
+
+    private var lastDebugText =
+        ""
 
     fun swap(
         sourceImage: Bitmap,
         targetImage: Bitmap
     ): Result {
 
-        val sourceFaces = detector.detect(sourceImage)
-        val targetFaces = detector.detect(targetImage)
+        val sourceFaces =
+            detector.detect(sourceImage)
+
+        val targetFaces =
+            detector.detect(targetImage)
 
         if (sourceFaces.isEmpty()) {
             throw IllegalStateException(
@@ -36,7 +43,9 @@ class FaceSwapPipeline(
         }
 
         val sourceFace =
-            sourceFaces.maxByOrNull { it.score }
+            sourceFaces.maxByOrNull {
+                it.score
+            }
                 ?: throw IllegalStateException(
                     "Source face selection failed"
                 )
@@ -47,38 +56,28 @@ class FaceSwapPipeline(
                 true
             )
 
-        try {
+        for (targetFace in targetFaces) {
 
-            for (targetFace in targetFaces) {
+            val next =
+                swapOneFace(
+                    sourceImage,
+                    sourceFace,
+                    result,
+                    targetFace
+                )
 
-                val previous = result
-
-                result =
-                    swapOneFace(
-                        sourceImage = sourceImage,
-                        sourceFace = sourceFace,
-                        targetImage = previous,
-                        targetFace = targetFace
-                    )
-
-                if (result !== previous && !previous.isRecycled) {
-                    previous.recycle()
-                }
-            }
-
-            return Result(
-                bitmap = result,
-                facesDetected = targetFaces.size
-            )
-
-        } catch (e: Throwable) {
-
-            if (!result.isRecycled) {
+            if (next !== result) {
                 result.recycle()
             }
 
-            throw e
+            result = next
         }
+
+        return Result(
+            bitmap = result,
+            facesDetected = targetFaces.size,
+            debugText = lastDebugText
+        )
     }
 
     private fun swapOneFace(
@@ -102,15 +101,6 @@ class FaceSwapPipeline(
 
         try {
 
-            /*
-             * IMPORTANT:
-             *
-             * DflAligner produces the 128x128 aligned face.
-             * ImageTensor must receive that image directly.
-             *
-             * No detector box is used here.
-             */
-
             val sourceTensor =
                 ImageTensor.bitmapToTensor(
                     alignedSource.bitmap
@@ -127,17 +117,8 @@ class FaceSwapPipeline(
                     dst = targetTensor
                 )
 
-            require(
-                prediction.rgb.size == 128 * 128 * 3
-            ) {
-                "Invalid LIAE RGB output: ${prediction.rgb.size}"
-            }
-
-            require(
-                prediction.mask.size == 128 * 128
-            ) {
-                "Invalid LIAE mask output: ${prediction.mask.size}"
-            }
+            lastDebugText =
+                prediction.debugText
 
             val swappedFace =
                 ImageTensor.tensorToBitmap(
@@ -151,28 +132,20 @@ class FaceSwapPipeline(
 
             try {
 
-                /*
-                 * Transform the generated 128x128 face
-                 * back into the ORIGINAL target image.
-                 */
                 val warpedFace =
                     warpToTarget(
-                        alignedFace = swappedFace,
-                        inverse = alignedTarget.inverse,
-                        targetWidth = targetImage.width,
-                        targetHeight = targetImage.height
+                        swappedFace,
+                        alignedTarget.inverse,
+                        targetImage.width,
+                        targetImage.height
                     )
 
-                /*
-                 * Transform the LIAE mask using exactly
-                 * the same transform.
-                 */
                 val warpedMask =
                     warpToTarget(
-                        alignedFace = mask,
-                        inverse = alignedTarget.inverse,
-                        targetWidth = targetImage.width,
-                        targetHeight = targetImage.height
+                        mask,
+                        alignedTarget.inverse,
+                        targetImage.width,
+                        targetImage.height
                     )
 
                 try {
@@ -185,35 +158,20 @@ class FaceSwapPipeline(
 
                 } finally {
 
-                    if (!warpedFace.isRecycled) {
-                        warpedFace.recycle()
-                    }
-
-                    if (!warpedMask.isRecycled) {
-                        warpedMask.recycle()
-                    }
+                    warpedFace.recycle()
+                    warpedMask.recycle()
                 }
 
             } finally {
 
-                if (!swappedFace.isRecycled) {
-                    swappedFace.recycle()
-                }
-
-                if (!mask.isRecycled) {
-                    mask.recycle()
-                }
+                swappedFace.recycle()
+                mask.recycle()
             }
 
         } finally {
 
-            if (!alignedSource.bitmap.isRecycled) {
-                alignedSource.bitmap.recycle()
-            }
-
-            if (!alignedTarget.bitmap.isRecycled) {
-                alignedTarget.bitmap.recycle()
-            }
+            alignedSource.bitmap.recycle()
+            alignedTarget.bitmap.recycle()
         }
     }
 
@@ -223,10 +181,6 @@ class FaceSwapPipeline(
         targetWidth: Int,
         targetHeight: Int
     ): Bitmap {
-
-        require(inverse.size == 6) {
-            "Expected 6-value affine inverse matrix, got ${inverse.size}"
-        }
 
         val matrix =
             Matrix()
@@ -254,24 +208,13 @@ class FaceSwapPipeline(
                 Bitmap.Config.ARGB_8888
             )
 
-        val canvas =
-            Canvas(output)
-
-        val paint =
+        Canvas(output).drawBitmap(
+            alignedFace,
+            matrix,
             Paint(
                 Paint.ANTI_ALIAS_FLAG or
                     Paint.FILTER_BITMAP_FLAG
             )
-
-        /*
-         * Bitmap is created transparent.
-         * Therefore only the transformed 128x128 face
-         * contributes pixels; the rest remains transparent.
-         */
-        canvas.drawBitmap(
-            alignedFace,
-            matrix,
-            paint
         )
 
         return output
