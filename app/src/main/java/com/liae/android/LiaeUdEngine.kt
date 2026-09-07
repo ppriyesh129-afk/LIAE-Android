@@ -14,7 +14,7 @@ class LiaeUdEngine(context: Context) {
         private const val CHANNELS = 3
     }
 
-    private val environment: OrtEnvironment = OrtEnvironment.getEnvironment()
+    private val environment = OrtEnvironment.getEnvironment()
     private val session: OrtSession
 
     init {
@@ -51,65 +51,90 @@ class LiaeUdEngine(context: Context) {
         val srcTensor = OnnxTensor.createTensor(
             environment,
             FloatBuffer.wrap(src),
-            longArrayOf(1, SIZE.toLong(), SIZE.toLong(), CHANNELS.toLong())
+            longArrayOf(
+                1,
+                SIZE.toLong(),
+                SIZE.toLong(),
+                CHANNELS.toLong()
+            )
         )
 
         val dstTensor = OnnxTensor.createTensor(
             environment,
             FloatBuffer.wrap(dst),
-            longArrayOf(1, SIZE.toLong(), SIZE.toLong(), CHANNELS.toLong())
+            longArrayOf(
+                1,
+                SIZE.toLong(),
+                SIZE.toLong(),
+                CHANNELS.toLong()
+            )
         )
 
-        srcTensor.use { srcT ->
-            dstTensor.use { dstT ->
+        try {
 
-                val inputs = mapOf(
-                    "src" to srcT,
-                    "dst" to dstT
+            val inputs = mapOf(
+                "src" to srcTensor,
+                "dst" to dstTensor
+            )
+
+            session.run(inputs).use { output ->
+
+                val rgb = flattenTensor(output[0].value)
+                val mask = flattenTensor(output[1].value)
+
+                return Result(
+                    rgb = rgb,
+                    mask = mask
                 )
-
-                session.run(inputs).use { output ->
-
-                    val rgb = extractFloatArray(output[0].value)
-                    val mask = extractFloatArray(output[1].value)
-
-                    return Result(
-                        rgb = rgb,
-                        mask = mask
-                    )
-                }
             }
+
+        } finally {
+            srcTensor.close()
+            dstTensor.close()
         }
     }
 
-    private fun extractFloatArray(value: Any): FloatArray {
+    private fun flattenTensor(value: Any): FloatArray {
 
-        @Suppress("UNCHECKED_CAST")
-        val tensor = value as Array<Array<Array<FloatArray>>>
+        return when (value) {
 
-        val height = tensor.size
-        val width = tensor[0].size
-        val channels = tensor[0][0].size
+            is Array<*> -> {
 
-        val result = FloatArray(
-            height * width * channels
-        )
+                val values = ArrayList<Float>()
 
-        var index = 0
+                fun collect(item: Any?) {
+                    when (item) {
 
-        for (y in 0 until height) {
-            for (x in 0 until width) {
-                for (c in 0 until channels) {
-                    result[index++] = tensor[y][x][c]
+                        is FloatArray -> {
+                            for (v in item) {
+                                values.add(v)
+                            }
+                        }
+
+                        is Array<*> -> {
+                            for (child in item) {
+                                collect(child)
+                            }
+                        }
+                    }
+                }
+
+                collect(value)
+
+                FloatArray(values.size) { index ->
+                    values[index]
                 }
             }
-        }
 
-        return result
+            else -> {
+                throw IllegalArgumentException(
+                    "Unsupported ONNX output type: ${value::class.java}"
+                )
+            }
+        }
     }
 
     fun close() {
         session.close()
-        environment.close()
     }
 }
