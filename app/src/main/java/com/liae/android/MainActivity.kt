@@ -7,8 +7,8 @@ import android.provider.MediaStore
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.TextView
-import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatActivity
 import kotlin.concurrent.thread
 
 class MainActivity : AppCompatActivity() {
@@ -17,110 +17,100 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var statusText: TextView
     private lateinit var resultImage: ImageView
-    private lateinit var selectButton: Button
+    private lateinit var sourceButton: Button
+    private lateinit var targetButton: Button
 
-    private val imagePicker =
-        registerForActivityResult(
-            ActivityResultContracts.GetContent()
-        ) { uri: Uri? ->
+    private var sourceBitmap: Bitmap? = null
+    private var targetBitmap: Bitmap? = null
 
-            if (uri != null) {
-                processImage(uri)
+    private val sourcePicker =
+        registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+            uri?.let {
+                sourceBitmap = MediaStore.Images.Media.getBitmap(contentResolver, it)
+                statusText.text = "Source selected"
+                startIfReady()
             }
         }
 
-    override fun onCreate(
-        savedInstanceState: Bundle?
-    ) {
+    private val targetPicker =
+        registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+            uri?.let {
+                targetBitmap = MediaStore.Images.Media.getBitmap(contentResolver, it)
+                statusText.text = "Target selected"
+                startIfReady()
+            }
+        }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        setContentView(
-            R.layout.activity_main
-        )
+        setContentView(R.layout.activity_main)
 
-        statusText =
-            findViewById(R.id.statusText)
+        statusText = findViewById(R.id.statusText)
+        resultImage = findViewById(R.id.resultImage)
 
-        resultImage =
-            findViewById(R.id.resultImage)
+        sourceButton = findViewById(R.id.sourceButton)
+        targetButton = findViewById(R.id.targetButton)
 
-        selectButton =
-            findViewById(R.id.selectButton)
+        statusText.text = "Select Source Face"
 
-        statusText.text = "Ready"
+        sourceButton.setOnClickListener {
+            sourcePicker.launch("image/*")
+        }
 
-        selectButton.setOnClickListener {
-
-            imagePicker.launch("image/*")
+        targetButton.setOnClickListener {
+            targetPicker.launch("image/*")
         }
     }
 
-    private fun processImage(
-        uri: Uri
-    ) {
+    private fun startIfReady() {
 
-        selectButton.isEnabled = false
+        val src = sourceBitmap ?: return
+        val dst = targetBitmap ?: return
 
-        statusText.text =
-            "Preparing..."
+        runSwap(src, dst)
+    }
+
+    private fun runSwap(srcBitmap: Bitmap, dstBitmap: Bitmap) {
+
+        sourceButton.isEnabled = false
+        targetButton.isEnabled = false
+
+        statusText.text = "Preparing..."
 
         thread {
 
             try {
 
-                runOnUiThread {
-                    statusText.text =
-                        "Loading LIAE model..."
-                }
-
                 if (engine == null) {
-
-                    engine =
-                        LiaeUdEngine(this)
+                    runOnUiThread {
+                        statusText.text = "Loading LIAE model..."
+                    }
+                    engine = LiaeUdEngine(this)
                 }
 
                 runOnUiThread {
-                    statusText.text =
-                        "Loading image..."
+                    statusText.text = "Preparing tensors..."
                 }
 
-                val bitmap: Bitmap =
-                    MediaStore.Images.Media.getBitmap(
-                        contentResolver,
-                        uri
-                    )
+                val srcTensor = ImageTensor.bitmapToTensor(srcBitmap)
+                val dstTensor = ImageTensor.bitmapToTensor(dstBitmap)
 
                 runOnUiThread {
-                    statusText.text =
-                        "Preparing tensor..."
+                    statusText.text = "Running LIAE..."
                 }
 
-                val tensor =
-                    ImageTensor.bitmapToTensor(
-                        bitmap
-                    )
-
-                runOnUiThread {
-                    statusText.text =
-                        "Running LIAE..."
-                }
-
-                val result =
-                    engine!!.run(
-                        src = tensor,
-                        dst = tensor
-                    )
+                val result = engine!!.run(
+                    src = srcTensor,
+                    dst = dstTensor
+                )
 
                 val outputBitmap =
-                    ImageTensor.tensorToBitmap(
-                        result.rgb
-                    )
+                    ImageTensor.tensorToBitmap(result.rgb)
 
                 runOnUiThread {
 
-                    resultImage.setImageBitmap(
-                        outputBitmap
-                    )
+                    resultImage.setImageBitmap(outputBitmap)
 
                     statusText.text =
                         """
@@ -130,39 +120,33 @@ class MainActivity : AppCompatActivity() {
                         Mask: ${result.mask.size}
                         """.trimIndent()
 
-                    selectButton.isEnabled = true
+                    sourceButton.isEnabled = true
+                    targetButton.isEnabled = true
                 }
 
             } catch (e: Throwable) {
 
-                val error =
-                    """
-                    LIAE ERROR
-
-                    ${e.javaClass.name}
-
-                    ${e.message}
-
-                    ${e.stackTraceToString()}
-                    """.trimIndent()
-
                 runOnUiThread {
 
                     statusText.text =
-                        error
+                        """
+                        LIAE ERROR
 
-                    selectButton.isEnabled = true
+                        ${e.javaClass.simpleName}
+
+                        ${e.message}
+                        """.trimIndent()
+
+                    sourceButton.isEnabled = true
+                    targetButton.isEnabled = true
                 }
             }
         }
     }
 
     override fun onDestroy() {
-
         engine?.close()
-
         engine = null
-
         super.onDestroy()
     }
 }
