@@ -21,7 +21,7 @@ object ImageTensor {
      * [1, 128, 128, 3]
      *
      * Layout:
-     * RGB RGB RGB RGB ...
+     * RGB RGB RGB ...
      *
      * Range:
      * 0.0 .. 1.0
@@ -95,13 +95,18 @@ object ImageTensor {
     }
 
     /*
-     * NHWC RGB tensor -> Bitmap
+     * DFL LIAE output -> Android Bitmap
      *
-     * Input:
+     * Model output is BGR.
+     *
+     * Tensor:
      * [1, 128, 128, 3]
      *
-     * Layout:
-     * RGB RGB RGB ...
+     * Tensor layout:
+     * BGR BGR BGR ...
+     *
+     * Android Bitmap:
+     * RGB
      */
     fun tensorToBitmap(
         tensor: FloatArray
@@ -110,7 +115,7 @@ object ImageTensor {
         require(
             tensor.size == IMAGE_FLOATS
         ) {
-            "Expected $IMAGE_FLOATS RGB values, got ${tensor.size}"
+            "Expected $IMAGE_FLOATS values, got ${tensor.size}"
         }
 
         val pixels =
@@ -122,7 +127,7 @@ object ImageTensor {
 
         for (i in pixels.indices) {
 
-            val r =
+            val b =
                 (
                     tensor[index++]
                         .coerceIn(0.0f, 1.0f) *
@@ -136,7 +141,7 @@ object ImageTensor {
                         255.0f
                 ).toInt()
 
-            val b =
+            val r =
                 (
                     tensor[index++]
                         .coerceIn(0.0f, 1.0f) *
