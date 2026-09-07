@@ -8,6 +8,7 @@ import android.widget.Button
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.result.contract.ActivityResultContracts
 import kotlin.concurrent.thread
 
 class MainActivity : AppCompatActivity() {
@@ -20,7 +21,7 @@ class MainActivity : AppCompatActivity() {
 
     private val imagePicker =
         registerForActivityResult(
-            androidx.activity.result.contract.ActivityResultContracts.GetContent()
+            ActivityResultContracts.GetContent()
         ) { uri: Uri? ->
 
             if (uri != null) {
@@ -50,9 +51,7 @@ class MainActivity : AppCompatActivity() {
 
         selectButton.setOnClickListener {
 
-            imagePicker.launch(
-                "image/*"
-            )
+            imagePicker.launch("image/*")
         }
     }
 
@@ -67,20 +66,13 @@ class MainActivity : AppCompatActivity() {
 
         thread {
 
-            var bitmap: Bitmap? = null
-
             try {
 
                 runOnUiThread {
-
                     statusText.text =
                         "Loading LIAE model..."
                 }
 
-                /*
-                 * Load the large ONNX model only when
-                 * the user actually selects an image.
-                 */
                 if (engine == null) {
 
                     engine =
@@ -88,81 +80,40 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 runOnUiThread {
-
                     statusText.text =
                         "Loading image..."
                 }
 
-                bitmap =
+                val bitmap: Bitmap =
                     MediaStore.Images.Media.getBitmap(
                         contentResolver,
                         uri
                     )
 
                 runOnUiThread {
-
                     statusText.text =
                         "Preparing tensor..."
                 }
 
-                /*
-                 * Convert image to:
-                 *
-                 * 128 x 128 x 3
-                 * RGB
-                 * 0..1
-                 */
                 val tensor =
                     ImageTensor.bitmapToTensor(
                         bitmap
                     )
 
                 runOnUiThread {
-
                     statusText.text =
                         "Running LIAE..."
                 }
 
-                /*
-                 * Current stage is an inference test.
-                 *
-                 * Source and destination are temporarily
-                 * the same image.
-                 */
                 val result =
                     engine!!.run(
                         src = tensor,
                         dst = tensor
                     )
 
-                /*
-                 * Apply the LIAE mask to the RGB output.
-                 *
-                 * This prevents the generated output from
-                 * being displayed outside the predicted face
-                 * region.
-                 */
-                val maskedRgb =
-                    ImageTensor.applyMask(
-                        rgb = result.rgb,
-                        mask = result.mask,
-                        background = tensor
-                    )
-
-                /*
-                 * Convert model output into an Android Bitmap.
-                 *
-                 * The converter handles:
-                 *
-                 * 0..1
-                 * -1..1
-                 * NaN
-                 * Infinity
-                 */
                 val outputBitmap =
-                    ImageTensor.modelRgbToBitmap(
-                        tensor = maskedRgb,
-                        bgr = false
+                    ImageTensor.tensorToBitmap(
+                        result.rgb
                     )
 
                 runOnUiThread {
@@ -177,18 +128,9 @@ class MainActivity : AppCompatActivity() {
 
                         RGB: ${result.rgb.size}
                         Mask: ${result.mask.size}
-
-                        RGB min: ${result.rgbMin}
-                        RGB max: ${result.rgbMax}
-                        RGB mean: ${result.rgbMean}
-
-                        Mask min: ${result.maskMin}
-                        Mask max: ${result.maskMax}
-                        Mask mean: ${result.maskMean}
                         """.trimIndent()
 
-                    selectButton.isEnabled =
-                        true
+                    selectButton.isEnabled = true
                 }
 
             } catch (e: Throwable) {
@@ -209,18 +151,8 @@ class MainActivity : AppCompatActivity() {
                     statusText.text =
                         error
 
-                    selectButton.isEnabled =
-                        true
+                    selectButton.isEnabled = true
                 }
-
-            } finally {
-
-                /*
-                 * Release the full-resolution source bitmap.
-                 *
-                 * The 128x128 output bitmap remains displayed.
-                 */
-                bitmap?.recycle()
             }
         }
     }
@@ -234,28 +166,3 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
     }
 }
-
-Now you have 3 updated pieces
-
-1. "LiaeUdEngine.kt"
-Diagnostic RGB/mask statistics.
-
-2. "ImageTensor.kt"
-RGB normalization + channel handling + mask application.
-
-3. "MainActivity.kt"
-Uses the new processing pipeline.
-
-Build a new APK and test one image.
-
-Then send me the displayed:
-
-RGB min:
-RGB max:
-RGB mean:
-
-Mask min:
-Mask max:
-Mask mean:
-
-Those values are important before we make the next LIAE correction.
