@@ -143,10 +143,9 @@ jobs:
 
           mkdir -p app/src/main/assets
 
-          wget \
-            --no-verbose \
-            --output-document app/src/main/assets/blazeface.onnx \
-            "https://github.com/ppriyesh129-afk/LIAE-Android/raw/main/models/blazeface.onnx"
+          wget --no-verbose \
+            -O app/src/main/assets/blazeface.onnx \
+            "https://github.com/yakhyo/mediapipe-face-mesh-onnx/releases/download/weights/face_detection_short_range.onnx"
 
           test -f app/src/main/assets/blazeface.onnx
 
