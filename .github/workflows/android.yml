@@ -102,7 +102,6 @@ jobs:
           import onnx
 
           path = os.environ["MODEL"]
-
           model = onnx.load(path)
 
           inputs = [x.name for x in model.graph.input]
@@ -111,7 +110,6 @@ jobs:
           print("========================================")
           print("ONNX INPUTS")
           print("========================================")
-
           for x in inputs:
               print(" -", x)
 
@@ -119,7 +117,6 @@ jobs:
           print("========================================")
           print("ONNX OUTPUTS")
           print("========================================")
-
           for x in outputs:
               print(" -", x)
 
@@ -165,13 +162,6 @@ jobs:
           fi
 
           echo "✓ REAL LIAE ONNX IS IN ASSETS"
-
-      - name: Download YuNet Face Detector
-        run: |
-          wget -O app/src/main/assets/face_detection_yunet_2023mar.onnx \
-          https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx
-
-          ls -lh app/src/main/assets/face_detection_yunet_2023mar.onnx
 
       - name: Build Debug APK
         run: |
