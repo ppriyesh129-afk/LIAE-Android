@@ -4,6 +4,7 @@ import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import android.content.Context
+import android.util.Log
 import java.nio.FloatBuffer
 
 class LiaeUdEngine(context: Context) {
@@ -40,7 +41,7 @@ class LiaeUdEngine(context: Context) {
 
     fun run(src: FloatArray, dst: FloatArray): Result {
 
-        // DeepFaceLab LIAE ONNX expects NHWC: (1,128,128,3)
+        // DeepFaceLab LIAE ONNX input: NHWC (1,128,128,3)
         val shape = longArrayOf(
             1,
             SIZE.toLong(),
@@ -61,6 +62,7 @@ class LiaeUdEngine(context: Context) {
         )
 
         return try {
+
             session.run(
                 mapOf(
                     "src" to srcTensor,
@@ -68,12 +70,27 @@ class LiaeUdEngine(context: Context) {
                 )
             ).use { outputs ->
 
-                val rgb = flatten(outputs[0].value)
-                val mask = flatten(outputs[1].value)
+                val rgbTensor = outputs[0] as OnnxTensor
+                val maskTensor = outputs[1] as OnnxTensor
 
-                Result(rgb, mask)
+                Log.d(
+                    "LIAE",
+                    "RGB shape = ${rgbTensor.info.shape.contentToString()}"
+                )
+
+                Log.d(
+                    "LIAE",
+                    "Mask shape = ${maskTensor.info.shape.contentToString()}"
+                )
+
+                Result(
+                    flatten(rgbTensor.value),
+                    flatten(maskTensor.value)
+                )
             }
+
         } finally {
+
             srcTensor.close()
             dstTensor.close()
         }
