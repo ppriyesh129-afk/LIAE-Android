@@ -36,6 +36,9 @@ class BlazeFaceDetector(
             return emptyList()
         }
 
+        /*
+         * Letterbox image into 128x128.
+         */
         val scale =
             INPUT_SIZE.toFloat() /
                     max(
@@ -101,169 +104,217 @@ class BlazeFaceDetector(
             )
 
         val result =
-            session.run(
-                mapOf(
-                    session.inputNames.first()
-                        to tensor
-                )
-            )
-
-        val regressors =
-            extractFloat2D(
-                result[0].value
-            )
-
-        val scores =
-            extractFloat2D(
-                result[1].value
-            )
-
-        val anchors =
-            generateAnchors()
-
-        val candidates =
-            mutableListOf<Detection>()
-
-        for (i in 0 until ANCHOR_COUNT) {
-
-            if (i >= regressors.size ||
-                i >= scores.size
-            ) {
-                break
-            }
-
-            if (regressors[i].size < 16 ||
-                scores[i].isEmpty()
-            ) {
-                continue
-            }
-
-            val score =
-                sigmoid(
-                    scores[i][0]
-                )
-
-            if (score < SCORE_THRESHOLD) {
-                continue
-            }
-
-            val values =
-                regressors[i]
-
-            val anchor =
-                anchors[i]
-
-            val cx =
-                values[0] /
-                        INPUT_SIZE +
-                        anchor[0]
-
-            val cy =
-                values[1] /
-                        INPUT_SIZE +
-                        anchor[1]
-
-            val width =
-                values[2] /
-                        INPUT_SIZE
-
-            val height =
-                values[3] /
-                        INPUT_SIZE
-
-            val x1 =
-                cx - width / 2f
-
-            val y1 =
-                cy - height / 2f
-
-            val x2 =
-                cx + width / 2f
-
-            val y2 =
-                cy + height / 2f
-
-            val keypoints =
-                Array(
-                    KEYPOINT_COUNT
-                ) { keypointIndex ->
-
-                    val offset =
-                        4 + keypointIndex * 2
-
-                    floatArrayOf(
-                        values[offset] /
-                                INPUT_SIZE +
-                                anchor[0],
-
-                        values[offset + 1] /
-                                INPUT_SIZE +
-                                anchor[1]
+            try {
+                session.run(
+                    mapOf(
+                        session.inputNames.first()
+                            to tensor
                     )
+                )
+            } finally {
+                tensor.close()
+                inputBitmap.recycle()
+            }
+
+        try {
+
+            val regressors =
+                extractFloat2D(
+                    result[0].value
+                )
+
+            val scores =
+                extractFloat2D(
+                    result[1].value
+                )
+
+            val anchors =
+                generateAnchors()
+
+            val candidates =
+                mutableListOf<Detection>()
+
+            for (i in 0 until ANCHOR_COUNT) {
+
+                if (
+                    i >= regressors.size ||
+                    i >= scores.size ||
+                    i >= anchors.size
+                ) {
+                    break
                 }
 
-            candidates.add(
-                Detection(
-                    score = score,
-                    x1 = x1,
-                    y1 = y1,
-                    x2 = x2,
-                    y2 = y2,
+                if (
+                    regressors[i].size < 16 ||
+                    scores[i].isEmpty()
+                ) {
+                    continue
+                }
+
+                val score =
+                    sigmoid(
+                        scores[i][0]
+                    )
+
+                if (score < SCORE_THRESHOLD) {
+                    continue
+                }
+
+                val values =
+                    regressors[i]
+
+                val anchor =
+                    anchors[i]
+
+                val cx =
+                    values[0] /
+                            INPUT_SIZE +
+                            anchor[0]
+
+                val cy =
+                    values[1] /
+                            INPUT_SIZE +
+                            anchor[1]
+
+                val width =
+                    values[2] /
+                            INPUT_SIZE
+
+                val height =
+                    values[3] /
+                            INPUT_SIZE
+
+                val x1 =
+                    cx -
+                            width / 2f
+
+                val y1 =
+                    cy -
+                            height / 2f
+
+                val x2 =
+                    cx +
+                            width / 2f
+
+                val y2 =
+                    cy +
+                            height / 2f
+
+                val keypoints =
+                    Array(
+                        KEYPOINT_COUNT
+                    ) { keypointIndex ->
+
+                        val offset =
+                            4 +
+                                    keypointIndex *
+                                    2
+
+                        floatArrayOf(
+                            values[offset] /
+                                    INPUT_SIZE +
+                                    anchor[0],
+
+                            values[offset + 1] /
+                                    INPUT_SIZE +
+                                    anchor[1]
+                        )
+                    }
+
+                candidates.add(
+                    Detection(
+                        score = score,
+                        x1 = x1,
+                        y1 = y1,
+                        x2 = x2,
+                        y2 = y2,
+                        keypoints = keypoints
+                    )
+                )
+            }
+
+            val selected =
+                weightedNms(
+                    candidates
+                )
+
+            /*
+             * Convert detector coordinates from
+             * 128x128 letterboxed space back into
+             * original image coordinates.
+             *
+             * IMPORTANT:
+             * We also convert all 6 landmarks.
+             */
+            return selected.map { detection ->
+
+                val x1 =
+                    unletterbox(
+                        detection.x1,
+                        padX,
+                        scale,
+                        originalWidth.toFloat()
+                    )
+
+                val y1 =
+                    unletterbox(
+                        detection.y1,
+                        padY,
+                        scale,
+                        originalHeight.toFloat()
+                    )
+
+                val x2 =
+                    unletterbox(
+                        detection.x2,
+                        padX,
+                        scale,
+                        originalWidth.toFloat()
+                    )
+
+                val y2 =
+                    unletterbox(
+                        detection.y2,
+                        padY,
+                        scale,
+                        originalHeight.toFloat()
+                    )
+
+                val keypoints =
+                    Array(
+                        KEYPOINT_COUNT
+                    ) { k ->
+
+                        floatArrayOf(
+
+                            unletterbox(
+                                detection.keypoints[k][0],
+                                padX,
+                                scale,
+                                originalWidth.toFloat()
+                            ),
+
+                            unletterbox(
+                                detection.keypoints[k][1],
+                                padY,
+                                scale,
+                                originalHeight.toFloat()
+                            )
+                        }
+                    }
+
+                BlazeFaceResult(
+                    left = x1,
+                    top = y1,
+                    right = x2,
+                    bottom = y2,
+                    score = detection.score,
                     keypoints = keypoints
                 )
-            )
-        }
+            }
 
-        tensor.close()
-        result.close()
-        inputBitmap.recycle()
-
-        val selected =
-            weightedNms(
-                candidates
-            )
-
-        return selected.map { detection ->
-
-            val x1 =
-                unletterbox(
-                    detection.x1,
-                    padX,
-                    scale,
-                    originalWidth.toFloat()
-                )
-
-            val y1 =
-                unletterbox(
-                    detection.y1,
-                    padY,
-                    scale,
-                    originalHeight.toFloat()
-                )
-
-            val x2 =
-                unletterbox(
-                    detection.x2,
-                    padX,
-                    scale,
-                    originalWidth.toFloat()
-                )
-
-            val y2 =
-                unletterbox(
-                    detection.y2,
-                    padY,
-                    scale,
-                    originalHeight.toFloat()
-                )
-
-            BlazeFaceResult(
-                left = x1,
-                top = y1,
-                right = x2,
-                bottom = y2,
-                score = detection.score
-            )
+        } finally {
+            result.close()
         }
     }
 
@@ -274,18 +325,26 @@ class BlazeFaceDetector(
                 ANCHOR_COUNT
             )
 
-        // First feature map:
-        // 16 x 16 cells
-        // 2 anchors per cell
+        /*
+         * 16x16 feature map
+         * 2 anchors per cell
+         *
+         * 16 * 16 * 2 = 512
+         */
         addGridAnchors(
             anchors = anchors,
             cells = 16,
             repeats = 2
         )
 
-        // Second feature map:
-        // 8 x 8 cells
-        // 6 anchors per cell
+        /*
+         * 8x8 feature map
+         * 6 anchors per cell
+         *
+         * 8 * 8 * 6 = 384
+         *
+         * Total = 896
+         */
         addGridAnchors(
             anchors = anchors,
             cells = 8,
@@ -353,7 +412,13 @@ class BlazeFaceDetector(
                         INPUT_SIZE
             )
 
-        // RGB, CHW, [-1, 1]
+        /*
+         * BlazeFace input:
+         *
+         * RGB
+         * CHW
+         * [-1, 1]
+         */
         for (channel in 0..2) {
 
             for (pixel in pixels) {
@@ -587,6 +652,7 @@ class BlazeFaceDetector(
                 ) { k ->
 
                     floatArrayOf(
+
                         keypointSums[k][0] /
                                 totalWeight,
 
