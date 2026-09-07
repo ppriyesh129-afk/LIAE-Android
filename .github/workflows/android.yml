@@ -95,8 +95,7 @@ jobs:
         env:
           MODEL: /tmp/liae_artifact/LIAE_128_80_48_16_fp32.onnx
         run: |
-          python -m pip install --disable-pip-version-check \
-            "onnx==1.16.2"
+          python -m pip install --disable-pip-version-check "onnx==1.16.2"
 
           python - <<'PY'
           import os
@@ -125,9 +124,7 @@ jobs:
               print(" -", x)
 
           if set(inputs) != {"src", "dst"}:
-              raise RuntimeError(
-                  "INVALID GRAPH INPUTS: " + str(inputs)
-              )
+              raise RuntimeError("INVALID GRAPH INPUTS: " + str(inputs))
 
           print()
           print("✓ ONLY src AND dst ARE GRAPH INPUTS")
@@ -145,8 +142,7 @@ jobs:
             /tmp/liae_artifact/LIAE_128_80_48_16_fp32.onnx \
             app/src/main/assets/LIAE_128_80_48_16_fp32.onnx
 
-          ls -lh \
-            app/src/main/assets/LIAE_128_80_48_16_fp32.onnx
+          ls -lh app/src/main/assets/LIAE_128_80_48_16_fp32.onnx
 
       - name: Verify Android model asset
         run: |
@@ -169,6 +165,13 @@ jobs:
           fi
 
           echo "✓ REAL LIAE ONNX IS IN ASSETS"
+
+      - name: Download YuNet Face Detector
+        run: |
+          wget -O app/src/main/assets/face_detection_yunet_2023mar.onnx \
+          https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx
+
+          ls -lh app/src/main/assets/face_detection_yunet_2023mar.onnx
 
       - name: Build Debug APK
         run: |
