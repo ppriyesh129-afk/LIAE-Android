@@ -6,30 +6,16 @@ import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import java.nio.FloatBuffer
-import kotlin.math.max
-import kotlin.math.min
 
 class YuNetDetector(
     private val context: Context
 ) {
 
     companion object {
-
         private const val MODEL_NAME =
             "face_detection_yunet_2023mar.onnx"
 
-        /*
-         * This YuNet ONNX expects:
-         *
-         * [1, 3, 640, 640]
-         *
-         * NCHW
-         */
-
         private const val INPUT_SIZE = 640
-
-        private const val SCORE_THRESHOLD = 0.6f
-        private const val NMS_THRESHOLD = 0.3f
     }
 
     data class Point(
@@ -42,13 +28,11 @@ class YuNetDetector(
         val y: Float,
         val width: Float,
         val height: Float,
-
         val rightEye: Point,
         val leftEye: Point,
         val nose: Point,
         val rightMouth: Point,
         val leftMouth: Point,
-
         val score: Float
     )
 
@@ -60,39 +44,25 @@ class YuNetDetector(
     init {
 
         val modelFile =
-            context.getFileStreamPath(
-                MODEL_NAME
-            )
+            context.getFileStreamPath(MODEL_NAME)
 
         if (
             !modelFile.exists() ||
             modelFile.length() < 100_000L
         ) {
-
-            context.assets
-                .open(MODEL_NAME)
-                .use { input ->
-
-                    modelFile
-                        .outputStream()
-                        .use { output ->
-
-                            input.copyTo(output)
-                        }
+            context.assets.open(MODEL_NAME).use { input ->
+                modelFile.outputStream().use { output ->
+                    input.copyTo(output)
                 }
+            }
         }
 
-        require(
-            modelFile.exists()
-        ) {
+        require(modelFile.exists()) {
             "YuNet model was not copied"
         }
 
-        require(
-            modelFile.length() > 100_000L
-        ) {
-            "YuNet model is too small: " +
-                modelFile.length()
+        require(modelFile.length() > 100_000L) {
+            "YuNet model is too small: ${modelFile.length()}"
         }
 
         session =
@@ -106,15 +76,6 @@ class YuNetDetector(
         bitmap: Bitmap
     ): List<Face> {
 
-        val originalWidth =
-            bitmap.width.toFloat()
-
-        val originalHeight =
-            bitmap.height.toFloat()
-
-        /*
-         * Resize image to 640x640.
-         */
         val resized =
             Bitmap.createScaledBitmap(
                 bitmap,
@@ -138,18 +99,6 @@ class YuNetDetector(
             INPUT_SIZE
         )
 
-        /*
-         * NCHW input:
-         *
-         * channel 0 = B
-         * channel 1 = G
-         * channel 2 = R
-         *
-         * Layout:
-         *
-         * [BBBB...][GGGG...][RRRR...]
-         */
-
         val planeSize =
             INPUT_SIZE * INPUT_SIZE
 
@@ -160,13 +109,9 @@ class YuNetDetector(
 
         var pixelIndex = 0
 
-        for (
-            y in 0 until INPUT_SIZE
-        ) {
+        for (y in 0 until INPUT_SIZE) {
 
-            for (
-                x in 0 until INPUT_SIZE
-            ) {
+            for (x in 0 until INPUT_SIZE) {
 
                 val pixel =
                     pixels[pixelIndex++]
@@ -186,18 +131,15 @@ class YuNetDetector(
                 val position =
                     y * INPUT_SIZE + x
 
-                input[position] =
-                    b
+                input[position] = b
 
                 input[
                     planeSize + position
-                ] =
-                    g
+                ] = g
 
                 input[
                     planeSize * 2 + position
-                ] =
-                    r
+                ] = r
             }
         }
 
@@ -229,18 +171,71 @@ class YuNetDetector(
             ).use { result ->
 
                 /*
-                 * Positional output access.
+                 * DIAGNOSTIC ONLY
+                 *
+                 * Do not parse the output yet.
                  */
-                val raw =
-                    result[0].value
 
-                val values =
-                    flatten(raw)
+                val outputCount =
+                    result.size
 
-                return parseOutput(
-                    values,
-                    originalWidth,
-                    originalHeight
+                val firstOutput =
+                    result[0]
+
+                val value =
+                    firstOutput.value
+
+                val tensorInfo =
+                    firstOutput.info
+
+                val message =
+                    buildString {
+
+                        appendLine(
+                            "YuNet inference succeeded."
+                        )
+
+                        appendLine(
+                            "Output count: $outputCount"
+                        )
+
+                        appendLine(
+                            "Output 0 type: " +
+                                value.javaClass.name
+                        )
+
+                        appendLine(
+                            "Output 0 info: " +
+                                tensorInfo.toString()
+                        )
+
+                        when (value) {
+
+                            is FloatArray -> {
+
+                                appendLine(
+                                    "FloatArray size: " +
+                                        value.size
+                                )
+                            }
+
+                            is Array<*> -> {
+
+                                appendLine(
+                                    "Array outer size: " +
+                                        value.size
+                                )
+
+                                appendLine(
+                                    "Array value: " +
+                                        describeArray(value)
+                                )
+                            }
+                        }
+                    }
+
+                throw IllegalStateException(
+                    message
                 )
             }
 
@@ -250,328 +245,27 @@ class YuNetDetector(
         }
     }
 
-    private fun parseOutput(
-        values: FloatArray,
-        originalWidth: Float,
-        originalHeight: Float
-    ): List<Face> {
+    private fun describeArray(
+        value: Array<*>
+    ): String {
 
-        /*
-         * YuNet detection format:
-         *
-         * x
-         * y
-         * width
-         * height
-         * right eye x/y
-         * left eye x/y
-         * nose x/y
-         * right mouth x/y
-         * left mouth x/y
-         * score
-         */
-
-        val stride = 15
-
-        if (
-            values.size % stride != 0
-        ) {
-
-            throw IllegalStateException(
-                "Unexpected YuNet output size: " +
-                    values.size +
-                    " (not divisible by 15)"
-            )
+        if (value.isEmpty()) {
+            return "[]"
         }
 
-        val scaleX =
-            originalWidth /
-                INPUT_SIZE.toFloat()
+        val first =
+            value[0]
 
-        val scaleY =
-            originalHeight /
-                INPUT_SIZE.toFloat()
+        return when (first) {
 
-        val detections =
-            ArrayList<Face>()
+            is FloatArray ->
+                "[${value.size}, ${first.size}]"
 
-        var offset = 0
+            is Array<*> ->
+                "[${value.size}, ${describeArray(first)}]"
 
-        while (
-            offset + stride <= values.size
-        ) {
-
-            val score =
-                values[offset + 14]
-
-            if (
-                score >= SCORE_THRESHOLD
-            ) {
-
-                val x =
-                    values[offset] *
-                        scaleX
-
-                val y =
-                    values[offset + 1] *
-                        scaleY
-
-                val width =
-                    values[offset + 2] *
-                        scaleX
-
-                val height =
-                    values[offset + 3] *
-                        scaleY
-
-                val rightEye =
-                    Point(
-                        values[offset + 4] *
-                            scaleX,
-                        values[offset + 5] *
-                            scaleY
-                    )
-
-                val leftEye =
-                    Point(
-                        values[offset + 6] *
-                            scaleX,
-                        values[offset + 7] *
-                            scaleY
-                    )
-
-                val nose =
-                    Point(
-                        values[offset + 8] *
-                            scaleX,
-                        values[offset + 9] *
-                            scaleY
-                    )
-
-                val rightMouth =
-                    Point(
-                        values[offset + 10] *
-                            scaleX,
-                        values[offset + 11] *
-                            scaleY
-                    )
-
-                val leftMouth =
-                    Point(
-                        values[offset + 12] *
-                            scaleX,
-                        values[offset + 13] *
-                            scaleY
-                    )
-
-                detections.add(
-                    Face(
-                        x = x,
-                        y = y,
-                        width = width,
-                        height = height,
-                        rightEye = rightEye,
-                        leftEye = leftEye,
-                        nose = nose,
-                        rightMouth = rightMouth,
-                        leftMouth = leftMouth,
-                        score = score
-                    )
-                )
-            }
-
-            offset += stride
-        }
-
-        return nms(detections)
-    }
-
-    private fun nms(
-        faces: List<Face>
-    ): List<Face> {
-
-        if (faces.isEmpty()) {
-            return emptyList()
-        }
-
-        val sorted =
-            faces
-                .sortedByDescending {
-                    it.score
-                }
-                .toMutableList()
-
-        val selected =
-            ArrayList<Face>()
-
-        while (
-            sorted.isNotEmpty()
-        ) {
-
-            val best =
-                sorted.removeAt(0)
-
-            selected.add(best)
-
-            val iterator =
-                sorted.iterator()
-
-            while (
-                iterator.hasNext()
-            ) {
-
-                val candidate =
-                    iterator.next()
-
-                if (
-                    iou(
-                        best,
-                        candidate
-                    ) > NMS_THRESHOLD
-                ) {
-
-                    iterator.remove()
-                }
-            }
-        }
-
-        return selected
-    }
-
-    private fun iou(
-        a: Face,
-        b: Face
-    ): Float {
-
-        val left =
-            max(
-                a.x,
-                b.x
-            )
-
-        val top =
-            max(
-                a.y,
-                b.y
-            )
-
-        val right =
-            min(
-                a.x + a.width,
-                b.x + b.width
-            )
-
-        val bottom =
-            min(
-                a.y + a.height,
-                b.y + b.height
-            )
-
-        val intersectionWidth =
-            max(
-                0f,
-                right - left
-            )
-
-        val intersectionHeight =
-            max(
-                0f,
-                bottom - top
-            )
-
-        val intersection =
-            intersectionWidth *
-                intersectionHeight
-
-        val areaA =
-            max(
-                0f,
-                a.width
-            ) *
-                max(
-                    0f,
-                    a.height
-                )
-
-        val areaB =
-            max(
-                0f,
-                b.width
-            ) *
-                max(
-                    0f,
-                    b.height
-                )
-
-        val union =
-            areaA +
-                areaB -
-                intersection
-
-        if (
-            union <= 0f
-        ) {
-            return 0f
-        }
-
-        return intersection / union
-    }
-
-    private fun flatten(
-        value: Any
-    ): FloatArray {
-
-        return when (value) {
-
-            is FloatArray -> {
-                value.copyOf()
-            }
-
-            is Array<*> -> {
-
-                val list =
-                    ArrayList<Float>()
-
-                fun collect(
-                    item: Any?
-                ) {
-
-                    when (item) {
-
-                        is FloatArray -> {
-
-                            for (v in item) {
-                                list.add(v)
-                            }
-                        }
-
-                        is Array<*> -> {
-
-                            for (
-                                child in item
-                            ) {
-                                collect(child)
-                            }
-                        }
-                    }
-                }
-
-                collect(value)
-
-                FloatArray(
-                    list.size
-                ) {
-                    list[it]
-                }
-            }
-
-            else -> {
-
-                throw IllegalStateException(
-                    "Unsupported YuNet output type: " +
-                        value.javaClass.name
-                )
-            }
+            else ->
+                "[${value.size}, ${first?.javaClass?.name}]"
         }
     }
 
