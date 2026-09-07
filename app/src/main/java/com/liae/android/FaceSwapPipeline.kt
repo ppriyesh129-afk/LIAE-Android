@@ -234,7 +234,6 @@ class FaceSwapPipeline(
     }
 
     fun close() {
-        detector.close()
         liae.close()
     }
 }
