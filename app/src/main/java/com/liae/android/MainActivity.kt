@@ -76,6 +76,7 @@ class MainActivity : AppCompatActivity() {
         statusText.text = "Preparing..."
 
         thread {
+
             try {
 
                 if (engine == null) {
@@ -102,24 +103,25 @@ class MainActivity : AppCompatActivity() {
                 )
 
                 val rgbBitmap = ImageTensor.tensorToBitmap(result.rgb)
-                val maskBitmap = ImageTensor.maskToBitmap(result.mask)
 
                 runOnUiThread {
 
-                    // Show RGB output (the swapped face)
                     resultImage.setImageBitmap(rgbBitmap)
 
                     statusText.text = """
-                        LIAE inference complete
+LIAE inference complete
 
-                        RGB: ${result.rgb.size}
-                        Mask: ${result.mask.size}
+RGB: ${result.rgb.size}
+Mask: ${result.mask.size}
 
-                        RGB min=${result.rgb.minOrNull()}
-                        RGB max=${result.rgb.maxOrNull()}
+RGB shape: ${engine!!.lastRgbShape.joinToString("×")}
+Mask shape: ${engine!!.lastMaskShape.joinToString("×")}
 
-                        Mask min=${result.mask.minOrNull()}
-                        Mask max=${result.mask.maxOrNull()}
+RGB min=${result.rgb.minOrNull()}
+RGB max=${result.rgb.maxOrNull()}
+
+Mask min=${result.mask.minOrNull()}
+Mask max=${result.mask.maxOrNull()}
                     """.trimIndent()
 
                     sourceButton.isEnabled = true
@@ -131,11 +133,11 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
 
                     statusText.text = """
-                        LIAE ERROR
+LIAE ERROR
 
-                        ${e.javaClass.simpleName}
+${e.javaClass.simpleName}
 
-                        ${e.message}
+${e.message}
                     """.trimIndent()
 
                     sourceButton.isEnabled = true
