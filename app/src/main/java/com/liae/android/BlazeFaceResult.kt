@@ -1,4 +1,4 @@
-package com.profaceswap
+package com.liae.android
 
 data class BlazeFaceResult(
     val left: Float,
