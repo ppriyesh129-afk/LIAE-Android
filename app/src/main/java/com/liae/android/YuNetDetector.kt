@@ -122,7 +122,7 @@ class YuNetDetector(
         /*
          * YuNet expects BGR pixel values.
          *
-         * No /255 normalization here.
+         * No /255 normalization.
          * Values remain in the 0..255 range.
          */
 
@@ -183,17 +183,27 @@ class YuNetDetector(
             val inputName =
                 session.inputNames.first()
 
-            val outputName =
-                session.outputNames.first()
-
             session.run(
                 mapOf(
                     inputName to tensor
                 )
             ).use { result ->
 
+                /*
+                 * IMPORTANT:
+                 *
+                 * Use positional output access.
+                 * Do not use:
+                 *
+                 * result[outputName].value
+                 *
+                 * because this produces the Kotlin
+                 * unresolved-reference error with
+                 * the current ONNX Runtime API.
+                 */
+
                 val raw =
-                    result[outputName].value
+                    result[0].value
 
                 val values =
                     flatten(raw)
