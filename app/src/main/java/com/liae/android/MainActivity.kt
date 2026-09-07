@@ -1,64 +1,96 @@
 package com.liae.android
 
+import android.graphics.Bitmap
+import android.net.Uri
 import android.os.Bundle
+import android.provider.MediaStore
+import android.widget.Button
+import android.widget.ImageView
 import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import kotlin.random.Random
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var engine: LiaeUdEngine
+
+    private lateinit var statusText: TextView
+    private lateinit var resultImage: ImageView
+
+    private val imagePicker =
+        registerForActivityResult(
+            ActivityResultContracts.GetContent()
+        ) { uri: Uri? ->
+
+            if (uri != null) {
+                processImage(uri)
+            }
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         setContentView(R.layout.activity_main)
 
-        val status = findViewById<TextView>(R.id.statusText)
+        statusText = findViewById(R.id.statusText)
+        resultImage = findViewById(R.id.resultImage)
+
+        engine = LiaeUdEngine(this)
+
+        findViewById<Button>(R.id.selectButton).setOnClickListener {
+            imagePicker.launch("image/*")
+        }
+    }
+
+    private fun processImage(uri: Uri) {
 
         try {
-            status.text = "Loading LIAE model..."
 
-            engine = LiaeUdEngine(this)
+            statusText.text = "Loading image..."
 
-            val src = FloatArray(128 * 128 * 3) {
-                Random.nextFloat()
-            }
+            val bitmap = MediaStore.Images.Media.getBitmap(
+                contentResolver,
+                uri
+            )
 
-            val dst = FloatArray(128 * 128 * 3) {
-                Random.nextFloat()
-            }
+            statusText.text = "Preparing tensor..."
 
-            status.text = "Running LIAE inference..."
+            val tensor = ImageTensor.bitmapToTensor(bitmap)
 
-            val result = engine.run(src, dst)
+            statusText.text = "Running LIAE..."
 
-            status.text =
+            val result = engine.run(
+                src = tensor,
+                dst = tensor
+            )
+
+            val outputBitmap =
+                ImageTensor.tensorToBitmap(result.rgb)
+
+            resultImage.setImageBitmap(outputBitmap)
+
+            statusText.text =
                 """
-                LIAE inference SUCCESS
+                LIAE inference complete
 
-                RGB floats: ${result.rgb.size}
-                Mask floats: ${result.mask.size}
-
-                Expected:
-                RGB  = 49152
-                Mask = 16384
+                RGB: ${result.rgb.size}
+                Mask: ${result.mask.size}
                 """.trimIndent()
 
         } catch (e: Exception) {
 
-            status.text =
+            statusText.text =
                 """
-                LIAE inference FAILED
+                Error
 
                 ${e.javaClass.simpleName}
-
                 ${e.message}
                 """.trimIndent()
         }
     }
 
     override fun onDestroy() {
+
         if (::engine.isInitialized) {
             engine.close()
         }
