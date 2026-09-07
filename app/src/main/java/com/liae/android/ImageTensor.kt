@@ -7,66 +7,137 @@ object ImageTensor {
 
     private const val SIZE = 128
 
-    // Bitmap -> NHWC FloatArray (1x128x128x3)
+    /*
+     * Bitmap -> NHWC FloatArray
+     * Shape:
+     * [1,128,128,3]
+     */
     fun bitmapToTensor(bitmap: Bitmap): FloatArray {
 
-        val resized = Bitmap.createScaledBitmap(bitmap, SIZE, SIZE, true)
-        val tensor = FloatArray(SIZE * SIZE * 3)
+        val resized =
+            Bitmap.createScaledBitmap(
+                bitmap,
+                SIZE,
+                SIZE,
+                true
+            )
+
+        val pixels =
+            IntArray(SIZE * SIZE)
+
+        resized.getPixels(
+            pixels,
+            0,
+            SIZE,
+            0,
+            0,
+            SIZE,
+            SIZE
+        )
+
+        val tensor =
+            FloatArray(SIZE * SIZE * 3)
 
         var i = 0
 
-        for (y in 0 until SIZE) {
-            for (x in 0 until SIZE) {
+        for (pixel in pixels) {
 
-                val c = resized.getPixel(x, y)
+            tensor[i++] =
+                Color.red(pixel) / 255f
 
-                tensor[i++] = Color.red(c) / 255f
-                tensor[i++] = Color.green(c) / 255f
-                tensor[i++] = Color.blue(c) / 255f
-            }
+            tensor[i++] =
+                Color.green(pixel) / 255f
+
+            tensor[i++] =
+                Color.blue(pixel) / 255f
+        }
+
+        if (resized !== bitmap) {
+            resized.recycle()
         }
 
         return tensor
     }
 
-    // Planar RGB (3x128x128) -> Bitmap
+    /*
+     * NHWC FloatArray -> Bitmap
+     * Shape:
+     * [1,128,128,3]
+     */
     fun tensorToBitmap(tensor: FloatArray): Bitmap {
 
-        val bmp = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888)
-
-        val plane = SIZE * SIZE
-
-        for (y in 0 until SIZE) {
-            for (x in 0 until SIZE) {
-
-                val i = y * SIZE + x
-
-                val r = (tensor[i].coerceIn(0f, 1f) * 255f).toInt()
-                val g = (tensor[plane + i].coerceIn(0f, 1f) * 255f).toInt()
-                val b = (tensor[plane * 2 + i].coerceIn(0f, 1f) * 255f).toInt()
-
-                bmp.setPixel(x, y, Color.rgb(r, g, b))
-            }
+        require(
+            tensor.size == SIZE * SIZE * 3
+        ) {
+            "Expected ${SIZE * SIZE * 3} floats, got ${tensor.size}"
         }
 
-        return bmp
-    }
-
-    // Mask -> grayscale Bitmap
-    fun maskToBitmap(mask: FloatArray): Bitmap {
-
-        val bmp = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888)
+        val pixels =
+            IntArray(SIZE * SIZE)
 
         var i = 0
 
-        for (y in 0 until SIZE) {
-            for (x in 0 until SIZE) {
+        for (p in pixels.indices) {
 
-                val v = (mask[i++].coerceIn(0f, 1f) * 255f).toInt()
-                bmp.setPixel(x, y, Color.rgb(v, v, v))
-            }
+            val r =
+                (tensor[i++]
+                    .coerceIn(0f, 1f) * 255f)
+                    .toInt()
+
+            val g =
+                (tensor[i++]
+                    .coerceIn(0f, 1f) * 255f)
+                    .toInt()
+
+            val b =
+                (tensor[i++]
+                    .coerceIn(0f, 1f) * 255f)
+                    .toInt()
+
+            pixels[p] =
+                Color.rgb(r, g, b)
         }
 
-        return bmp
+        return Bitmap.createBitmap(
+            pixels,
+            SIZE,
+            SIZE,
+            Bitmap.Config.ARGB_8888
+        )
+    }
+
+    /*
+     * Mask -> Grayscale Bitmap
+     * Shape:
+     * [1,128,128,1]
+     */
+    fun maskToBitmap(mask: FloatArray): Bitmap {
+
+        require(
+            mask.size == SIZE * SIZE
+        ) {
+            "Expected ${SIZE * SIZE} mask values, got ${mask.size}"
+        }
+
+        val pixels =
+            IntArray(SIZE * SIZE)
+
+        for (i in pixels.indices) {
+
+            val v =
+                (mask[i]
+                    .coerceIn(0f, 1f) * 255f)
+                    .toInt()
+
+            pixels[i] =
+                Color.rgb(v, v, v)
+        }
+
+        return Bitmap.createBitmap(
+            pixels,
+            SIZE,
+            SIZE,
+            Bitmap.Config.ARGB_8888
+        )
     }
 }
