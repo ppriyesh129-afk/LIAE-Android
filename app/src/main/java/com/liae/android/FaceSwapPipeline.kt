@@ -2,8 +2,10 @@ package com.liae.android
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.PorterDuff
 
 class FaceSwapPipeline(
     private val detector: BlazeFaceDetector,
@@ -16,8 +18,7 @@ class FaceSwapPipeline(
         val debugText: String
     )
 
-    private var lastDebugText =
-        ""
+    private var lastDebugText = ""
 
     fun swap(
         sourceImage: Bitmap,
@@ -31,14 +32,12 @@ class FaceSwapPipeline(
             detector.detect(targetImage)
 
         if (sourceFaces.isEmpty()) {
-
             throw IllegalStateException(
                 "No face detected in source image"
             )
         }
 
         if (targetFaces.isEmpty()) {
-
             throw IllegalStateException(
                 "No face detected in target image"
             )
@@ -62,10 +61,10 @@ class FaceSwapPipeline(
 
             val next =
                 swapOneFace(
-                    sourceImage,
-                    sourceFace,
-                    result,
-                    targetFace
+                    sourceImage = sourceImage,
+                    sourceFace = sourceFace,
+                    targetImage = result,
+                    targetFace = targetFace
                 )
 
             if (next !== result) {
@@ -103,6 +102,14 @@ class FaceSwapPipeline(
 
         try {
 
+            /*
+             * Convert aligned faces to:
+             *
+             * [1,128,128,3]
+             * NHWC
+             * BGR
+             * 0..1
+             */
             val sourceTensor =
                 ImageTensor.bitmapToTensor(
                     alignedSource.bitmap
@@ -113,6 +120,9 @@ class FaceSwapPipeline(
                     alignedTarget.bitmap
                 )
 
+            /*
+             * Run LIAE.
+             */
             val prediction =
                 liae.run(
                     src = sourceTensor,
@@ -123,12 +133,13 @@ class FaceSwapPipeline(
                 prediction.debugText
 
             /*
-             * Convert raw LIAE output to Bitmap.
+             * LIAE output:
              *
-             * IMPORTANT:
+             * output_1:
+             * [1,128,128,3]
              *
-             * This is the direct model output before
-             * warping and before merging.
+             * output_2:
+             * [1,128,128,1]
              */
             val swappedFace =
                 ImageTensor.tensorToBitmap(
@@ -142,24 +153,37 @@ class FaceSwapPipeline(
 
             try {
 
+                /*
+                 * Transform generated face from
+                 * aligned 128x128 space back into
+                 * target-image coordinates.
+                 */
                 val warpedFace =
                     warpToTarget(
-                        swappedFace,
-                        alignedTarget.inverse,
-                        targetImage.width,
-                        targetImage.height
+                        alignedFace = swappedFace,
+                        inverse = alignedTarget.inverse,
+                        targetWidth = targetImage.width,
+                        targetHeight = targetImage.height
                     )
 
+                /*
+                 * Transform the mask using exactly
+                 * the same geometry.
+                 */
                 val warpedMask =
                     warpToTarget(
-                        mask,
-                        alignedTarget.inverse,
-                        targetImage.width,
-                        targetImage.height
+                        alignedFace = mask,
+                        inverse = alignedTarget.inverse,
+                        targetWidth = targetImage.width,
+                        targetHeight = targetImage.height
                     )
 
                 try {
 
+                    /*
+                     * Blend the warped face with
+                     * the original target.
+                     */
                     return DflMerger.merge(
                         background = targetImage,
                         warpedFace = warpedFace,
@@ -168,29 +192,59 @@ class FaceSwapPipeline(
 
                 } finally {
 
-                    warpedFace.recycle()
-                    warpedMask.recycle()
+                    if (!warpedFace.isRecycled) {
+                        warpedFace.recycle()
+                    }
+
+                    if (!warpedMask.isRecycled) {
+                        warpedMask.recycle()
+                    }
                 }
 
             } finally {
 
-                swappedFace.recycle()
-                mask.recycle()
+                if (!swappedFace.isRecycled) {
+                    swappedFace.recycle()
+                }
+
+                if (!mask.isRecycled) {
+                    mask.recycle()
+                }
             }
 
         } finally {
 
-            alignedSource.bitmap.recycle()
-            alignedTarget.bitmap.recycle()
+            if (!alignedSource.bitmap.isRecycled) {
+                alignedSource.bitmap.recycle()
+            }
+
+            if (!alignedTarget.bitmap.isRecycled) {
+                alignedTarget.bitmap.recycle()
+            }
         }
     }
 
+    /*
+     * Warp a 128x128 aligned image back into
+     * the full target-image coordinate system.
+     *
+     * The output starts fully transparent.
+     *
+     * This is important because pixels outside
+     * the transformed face must NOT become part
+     * of the final blend.
+     */
     private fun warpToTarget(
         alignedFace: Bitmap,
         inverse: FloatArray,
         targetWidth: Int,
         targetHeight: Int
     ): Bitmap {
+
+        require(inverse.size == 6) {
+            "Expected 6-value affine inverse matrix, " +
+                "got ${inverse.size}"
+        }
 
         val matrix =
             Matrix()
@@ -222,12 +276,25 @@ class FaceSwapPipeline(
         val canvas =
             Canvas(output)
 
+        /*
+         * Start completely transparent.
+         */
+        canvas.drawColor(
+            Color.TRANSPARENT,
+            PorterDuff.Mode.CLEAR
+        )
+
         val paint =
             Paint(
                 Paint.ANTI_ALIAS_FLAG or
                     Paint.FILTER_BITMAP_FLAG
             )
 
+        paint.isFilterBitmap = true
+
+        /*
+         * Draw transformed aligned image.
+         */
         canvas.drawBitmap(
             alignedFace,
             matrix,
