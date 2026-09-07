@@ -4,11 +4,9 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Matrix
 import android.graphics.Paint
-import kotlin.math.max
-import kotlin.math.min
 
 class FaceSwapPipeline(
-    private val detector: YuNetDetector,
+    private val detector: BlazeFaceDetector,
     private val liae: LiaeUdEngine
 ) {
 
@@ -22,54 +20,35 @@ class FaceSwapPipeline(
         targetImage: Bitmap
     ): Result {
 
-        val sourceFaces =
-            detector.detect(sourceImage)
-
-        val targetFaces =
-            detector.detect(targetImage)
+        val sourceFaces = detector.detect(sourceImage)
+        val targetFaces = detector.detect(targetImage)
 
         if (sourceFaces.isEmpty()) {
-            throw IllegalStateException(
-                "No face detected in source image"
-            )
+            throw IllegalStateException("No face detected in source image")
         }
 
         if (targetFaces.isEmpty()) {
-            throw IllegalStateException(
-                "No face detected in target image"
-            )
+            throw IllegalStateException("No face detected in target image")
         }
 
-        /*
-         * Use the highest-confidence source face.
-         */
         val sourceFace =
-            sourceFaces.maxByOrNull {
-                it.score
-            } ?: throw IllegalStateException(
-                "Source face selection failed"
-            )
+            sourceFaces.maxByOrNull { it.score }
+                ?: throw IllegalStateException("Source face selection failed")
 
-        /*
-         * Start with the original target.
-         */
         var result =
             targetImage.copy(
                 Bitmap.Config.ARGB_8888,
                 true
             )
 
-        /*
-         * Process every detected target face.
-         */
         for (targetFace in targetFaces) {
 
             result =
                 swapOneFace(
-                    sourceImage = sourceImage,
-                    sourceFace = sourceFace,
-                    targetImage = result,
-                    targetFace = targetFace
+                    sourceImage,
+                    sourceFace,
+                    result,
+                    targetFace
                 )
         }
 
@@ -81,28 +60,16 @@ class FaceSwapPipeline(
 
     private fun swapOneFace(
         sourceImage: Bitmap,
-        sourceFace: YuNetDetector.Face,
+        sourceFace: BlazeFaceResult,
         targetImage: Bitmap,
-        targetFace: YuNetDetector.Face
+        targetFace: BlazeFaceResult
     ): Bitmap {
-
-        /*
-         * --------------------------------------------------
-         * SOURCE ALIGNMENT
-         * --------------------------------------------------
-         */
 
         val alignedSource =
             DflAligner.align(
                 sourceImage,
                 sourceFace
             )
-
-        /*
-         * --------------------------------------------------
-         * TARGET ALIGNMENT
-         * --------------------------------------------------
-         */
 
         val alignedTarget =
             DflAligner.align(
@@ -112,10 +79,6 @@ class FaceSwapPipeline(
 
         try {
 
-            /*
-             * Convert both aligned faces to
-             * NHWC float tensors.
-             */
             val sourceTensor =
                 ImageTensor.bitmapToTensor(
                     alignedSource.bitmap
@@ -126,41 +89,17 @@ class FaceSwapPipeline(
                     alignedTarget.bitmap
                 )
 
-            /*
-             * --------------------------------------------------
-             * LIAE-UD
-             * --------------------------------------------------
-             *
-             * Inputs:
-             *
-             * src [1,128,128,3]
-             * dst [1,128,128,3]
-             *
-             * Outputs:
-             *
-             * RGB  [1,128,128,3]
-             * MASK [1,128,128,1]
-             */
-
             val prediction =
                 liae.run(
                     src = sourceTensor,
                     dst = targetTensor
                 )
 
-            /*
-             * Convert generated RGB face
-             * into a bitmap.
-             */
             val swappedFace =
                 ImageTensor.tensorToBitmap(
                     prediction.rgb
                 )
 
-            /*
-             * Convert the single-channel LIAE mask
-             * into a usable alpha mask.
-             */
             val mask =
                 createMaskBitmap(
                     prediction.mask
@@ -168,44 +107,27 @@ class FaceSwapPipeline(
 
             try {
 
-                /*
-                 * --------------------------------------------------
-                 * INVERSE AFFINE
-                 * --------------------------------------------------
-                 *
-                 * The generated 128x128 face and mask are currently
-                 * in aligned DFL coordinates.
-                 *
-                 * Warp them back into the target image.
-                 */
-
                 val warpedFace =
                     warpToTarget(
-                        alignedFace = swappedFace,
-                        inverse = alignedTarget.inverse,
-                        targetWidth = targetImage.width,
-                        targetHeight = targetImage.height
+                        swappedFace,
+                        alignedTarget.inverse,
+                        targetImage.width,
+                        targetImage.height
                     )
 
                 val warpedMask =
                     warpToTarget(
-                        alignedFace = mask,
-                        inverse = alignedTarget.inverse,
-                        targetWidth = targetImage.width,
-                        targetHeight = targetImage.height
+                        mask,
+                        alignedTarget.inverse,
+                        targetImage.width,
+                        targetImage.height
                     )
-
-                /*
-                 * --------------------------------------------------
-                 * BLEND
-                 * --------------------------------------------------
-                 */
 
                 val output =
                     blend(
-                        background = targetImage,
-                        foreground = warpedFace,
-                        mask = warpedMask
+                        targetImage,
+                        warpedFace,
+                        warpedMask
                     )
 
                 warpedFace.recycle()
@@ -226,41 +148,25 @@ class FaceSwapPipeline(
         }
     }
 
-    /**
-     * Convert LIAE's [128,128,1] mask into
-     * an ARGB bitmap.
-     */
     private fun createMaskBitmap(
         mask: FloatArray
     ): Bitmap {
 
-        val expected =
-            128 * 128
-
-        require(mask.size == expected) {
-            "Expected 128x128 mask, got ${mask.size}"
-        }
+        require(mask.size == 128 * 128)
 
         val pixels =
-            IntArray(expected)
+            IntArray(128 * 128)
 
-        for (i in 0 until expected) {
+        for (i in pixels.indices) {
 
-            /*
-             * LIAE mask is expected in 0..1.
-             */
             val alpha =
-                (
-                    mask[i]
-                        .coerceIn(0.0f, 1.0f) *
-                        255.0f
-                    ).toInt()
+                (mask[i]
+                    .coerceIn(0f, 1f) * 255f)
+                    .toInt()
 
             pixels[i] =
-                (
-                    alpha shl 24
-                ) or
-                    0x00FFFFFF
+                (alpha shl 24) or
+                        0x00FFFFFF
         }
 
         return Bitmap.createBitmap(
@@ -271,14 +177,6 @@ class FaceSwapPipeline(
         )
     }
 
-    /**
-     * Warp a 128x128 aligned image back to
-     * original target-image coordinates.
-     *
-     * DflAligner.inverse maps:
-     *
-     * aligned -> original
-     */
     private fun warpToTarget(
         alignedFace: Bitmap,
         inverse: FloatArray,
@@ -286,19 +184,16 @@ class FaceSwapPipeline(
         targetHeight: Int
     ): Bitmap {
 
-        val matrix =
-            Matrix()
+        val matrix = Matrix()
 
         matrix.setValues(
             floatArrayOf(
                 inverse[0],
                 inverse[1],
                 inverse[2],
-
                 inverse[3],
                 inverse[4],
                 inverse[5],
-
                 0f,
                 0f,
                 1f
@@ -312,181 +207,77 @@ class FaceSwapPipeline(
                 Bitmap.Config.ARGB_8888
             )
 
-        val canvas =
-            Canvas(output)
-
-        val paint =
-            Paint(
-                Paint.ANTI_ALIAS_FLAG or
-                    Paint.FILTER_BITMAP_FLAG
-            )
-
-        canvas.drawBitmap(
+        Canvas(output).drawBitmap(
             alignedFace,
             matrix,
-            paint
+            Paint(
+                Paint.ANTI_ALIAS_FLAG or
+                        Paint.FILTER_BITMAP_FLAG
+            )
         )
 
         return output
     }
 
-    /**
-     * Alpha blend:
-     *
-     * output =
-     *     foreground * mask +
-     *     background * (1-mask)
-     *
-     * This runs only where the warped mask
-     * contains useful values.
-     */
     private fun blend(
         background: Bitmap,
         foreground: Bitmap,
         mask: Bitmap
     ): Bitmap {
 
-        require(
-            background.width ==
-                foreground.width &&
-                background.height ==
-                foreground.height
-        )
+        val width = background.width
+        val height = background.height
 
-        require(
-            background.width ==
-                mask.width &&
-                background.height ==
-                mask.height
-        )
+        val bg = IntArray(width * height)
+        val fg = IntArray(width * height)
+        val mk = IntArray(width * height)
+        val out = IntArray(width * height)
 
-        val width =
-            background.width
+        background.getPixels(bg, 0, width, 0, 0, width, height)
+        foreground.getPixels(fg, 0, width, 0, 0, width, height)
+        mask.getPixels(mk, 0, width, 0, 0, width, height)
 
-        val height =
-            background.height
+        for (i in out.indices) {
 
-        val bgPixels =
-            IntArray(width * height)
-
-        val fgPixels =
-            IntArray(width * height)
-
-        val maskPixels =
-            IntArray(width * height)
-
-        background.getPixels(
-            bgPixels,
-            0,
-            width,
-            0,
-            0,
-            width,
-            height
-        )
-
-        foreground.getPixels(
-            fgPixels,
-            0,
-            width,
-            0,
-            0,
-            width,
-            height
-        )
-
-        mask.getPixels(
-            maskPixels,
-            0,
-            width,
-            0,
-            0,
-            width,
-            height
-        )
-
-        val output =
-            IntArray(width * height)
-
-        for (i in output.indices) {
-
-            val bg =
-                bgPixels[i]
-
-            val fg =
-                fgPixels[i]
-
-            /*
-             * Alpha channel from mask.
-             */
             val alpha =
-                (
-                    maskPixels[i] ushr 24
-                ) / 255.0f
-
-            /*
-             * Slight feathering.
-             *
-             * This prevents a hard edge around the
-             * generated face.
-             */
-            val a =
                 smoothStep(
                     0.05f,
                     0.95f,
-                    alpha
+                    (mk[i] ushr 24) / 255f
                 )
 
-            val br =
-                (bg shr 16) and 0xFF
+            val br = (bg[i] shr 16) and 255
+            val bgc = (bg[i] shr 8) and 255
+            val bb = bg[i] and 255
 
-            val bgc =
-                (bg shr 8) and 0xFF
-
-            val bb =
-                bg and 0xFF
-
-            val fr =
-                (fg shr 16) and 0xFF
-
-            val fgc =
-                (fg shr 8) and 0xFF
-
-            val fb =
-                fg and 0xFF
+            val fr = (fg[i] shr 16) and 255
+            val fgc = (fg[i] shr 8) and 255
+            val fb = fg[i] and 255
 
             val r =
-                (
-                    br * (1.0f - a) +
-                        fr * a
-                    ).toInt()
-                        .coerceIn(0, 255)
+                (br * (1 - alpha) + fr * alpha)
+                    .toInt()
+                    .coerceIn(0, 255)
 
             val g =
-                (
-                    bgc * (1.0f - a) +
-                        fgc * a
-                    ).toInt()
-                        .coerceIn(0, 255)
+                (bgc * (1 - alpha) + fgc * alpha)
+                    .toInt()
+                    .coerceIn(0, 255)
 
             val b =
-                (
-                    bb * (1.0f - a) +
-                        fb * a
-                    ).toInt()
-                        .coerceIn(0, 255)
+                (bb * (1 - alpha) + fb * alpha)
+                    .toInt()
+                    .coerceIn(0, 255)
 
-            output[i] =
-                (
-                    0xFF shl 24
-                ) or
-                    (r shl 16) or
-                    (g shl 8) or
-                    b
+            out[i] =
+                (0xFF shl 24) or
+                        (r shl 16) or
+                        (g shl 8) or
+                        b
         }
 
         return Bitmap.createBitmap(
-            output,
+            out,
             width,
             height,
             Bitmap.Config.ARGB_8888
@@ -500,20 +291,14 @@ class FaceSwapPipeline(
     ): Float {
 
         val x =
-            (
-                (value - edge0) /
-                    (edge1 - edge0)
-                ).coerceIn(
-                    0.0f,
-                    1.0f
-                )
+            ((value - edge0) /
+                    (edge1 - edge0))
+                .coerceIn(0f, 1f)
 
-        return x * x *
-            (3.0f - 2.0f * x)
+        return x * x * (3f - 2f * x)
     }
 
     fun close() {
-        detector.close()
         liae.close()
     }
 }
