@@ -29,38 +29,62 @@ class LiaeUdEngine(context: Context) {
         private set
 
     init {
-        val modelFile = context.getFileStreamPath(MODEL_NAME)
+
+        val modelFile =
+            context.getFileStreamPath(MODEL_NAME)
 
         if (!modelFile.exists()) {
+
             context.assets.open(MODEL_NAME).use { input ->
+
                 modelFile.outputStream().use { output ->
+
                     input.copyTo(output)
                 }
             }
         }
 
-        session = env.createSession(
-            modelFile.absolutePath,
-            OrtSession.SessionOptions()
-        )
+        session =
+            env.createSession(
+                modelFile.absolutePath,
+                OrtSession.SessionOptions()
+            )
     }
 
-    fun run(src: FloatArray, dst: FloatArray): Result {
+    fun run(
+        src: FloatArray,
+        dst: FloatArray
+    ): Result {
 
-        // ONNX model input: NHWC (1,128,128,3)
-        val inputShape = longArrayOf(1, SIZE.toLong(), SIZE.toLong(), 3)
+        require(src.size == SIZE * SIZE * 3) {
+            "Source tensor size must be ${SIZE * SIZE * 3}, got ${src.size}"
+        }
 
-        val srcTensor = OnnxTensor.createTensor(
-            env,
-            FloatBuffer.wrap(src),
-            inputShape
-        )
+        require(dst.size == SIZE * SIZE * 3) {
+            "Target tensor size must be ${SIZE * SIZE * 3}, got ${dst.size}"
+        }
 
-        val dstTensor = OnnxTensor.createTensor(
-            env,
-            FloatBuffer.wrap(dst),
-            inputShape
-        )
+        val inputShape =
+            longArrayOf(
+                1,
+                SIZE.toLong(),
+                SIZE.toLong(),
+                3
+            )
+
+        val srcTensor =
+            OnnxTensor.createTensor(
+                env,
+                FloatBuffer.wrap(src),
+                inputShape
+            )
+
+        val dstTensor =
+            OnnxTensor.createTensor(
+                env,
+                FloatBuffer.wrap(dst),
+                inputShape
+            )
 
         return try {
 
@@ -71,18 +95,45 @@ class LiaeUdEngine(context: Context) {
                 )
             ).use { outputs ->
 
-                val rgbTensor = outputs[0] as OnnxTensor
-                val maskTensor = outputs[1] as OnnxTensor
+                val rgbTensor =
+                    outputs["output_1"] as OnnxTensor
 
-                lastRgbShape = rgbTensor.info.shape
-                lastMaskShape = maskTensor.info.shape
+                val maskTensor =
+                    outputs["output_2"] as OnnxTensor
 
-                Log.d("LIAE", "RGB shape = ${lastRgbShape.contentToString()}")
-                Log.d("LIAE", "Mask shape = ${lastMaskShape.contentToString()}")
+                lastRgbShape =
+                    rgbTensor.info.shape
+
+                lastMaskShape =
+                    maskTensor.info.shape
+
+                Log.d(
+                    "LIAE",
+                    "RGB shape = ${lastRgbShape.contentToString()}"
+                )
+
+                Log.d(
+                    "LIAE",
+                    "Mask shape = ${lastMaskShape.contentToString()}"
+                )
+
+                val rgb =
+                    flatten(rgbTensor.value)
+
+                val mask =
+                    flatten(maskTensor.value)
+
+                require(rgb.size == SIZE * SIZE * 3) {
+                    "Unexpected RGB size: ${rgb.size}"
+                }
+
+                require(mask.size == SIZE * SIZE) {
+                    "Unexpected Mask size: ${mask.size}"
+                }
 
                 Result(
-                    flatten(rgbTensor.value),
-                    flatten(maskTensor.value)
+                    rgb = rgb,
+                    mask = mask
                 )
             }
 
@@ -93,18 +144,35 @@ class LiaeUdEngine(context: Context) {
         }
     }
 
-    private fun flatten(value: Any): FloatArray {
+    private fun flatten(
+        value: Any
+    ): FloatArray {
 
-        val out = ArrayList<Float>()
+        val out =
+            ArrayList<Float>()
 
         fun walk(v: Any?) {
+
             when (v) {
-                is FloatArray -> out.addAll(v.toList())
-                is Array<*> -> v.forEach { walk(it) }
+
+                is FloatArray -> {
+
+                    for (f in v) {
+                        out.add(f)
+                    }
+                }
+
+                is Array<*> -> {
+
+                    for (child in v) {
+                        walk(child)
+                    }
+                }
             }
         }
 
         walk(value)
+
         return out.toFloatArray()
     }
 
