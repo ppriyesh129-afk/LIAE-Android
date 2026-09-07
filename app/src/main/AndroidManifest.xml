@@ -5,7 +5,7 @@
         android:allowBackup="true"
         android:label="LIAE Android"
         android:supportsRtl="true"
-        android:theme="@style/Theme.AppCompat.Light.NoActionBar">
+        android:theme="@style/AppTheme">
 
         <activity
             android:name=".MainActivity"
