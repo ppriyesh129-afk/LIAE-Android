@@ -3,6 +3,7 @@ package com.liae.android
 import android.os.Bundle
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import kotlin.random.Random
 
 class MainActivity : AppCompatActivity() {
 
@@ -16,12 +17,44 @@ class MainActivity : AppCompatActivity() {
         val status = findViewById<TextView>(R.id.statusText)
 
         try {
+            status.text = "Loading LIAE model..."
+
             engine = LiaeUdEngine(this)
 
-            status.text = "LIAE ONNX model loaded successfully"
+            val src = FloatArray(128 * 128 * 3) {
+                Random.nextFloat()
+            }
+
+            val dst = FloatArray(128 * 128 * 3) {
+                Random.nextFloat()
+            }
+
+            status.text = "Running LIAE inference..."
+
+            val result = engine.run(src, dst)
+
+            status.text =
+                """
+                LIAE inference SUCCESS
+
+                RGB floats: ${result.rgb.size}
+                Mask floats: ${result.mask.size}
+
+                Expected:
+                RGB  = 49152
+                Mask = 16384
+                """.trimIndent()
 
         } catch (e: Exception) {
-            status.text = "Model load failed:\n${e.message}"
+
+            status.text =
+                """
+                LIAE inference FAILED
+
+                ${e.javaClass.simpleName}
+
+                ${e.message}
+                """.trimIndent()
         }
     }
 
