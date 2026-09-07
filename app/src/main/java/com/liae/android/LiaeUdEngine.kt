@@ -14,11 +14,17 @@ class LiaeUdEngine(context: Context) {
             "LIAE_128_80_48_16_fp32.onnx"
 
         private const val SIZE = 128
+        private const val CHANNELS = 3
+        private const val IMAGE_FLOATS =
+            SIZE * SIZE * CHANNELS
+        private const val MASK_FLOATS =
+            SIZE * SIZE
     }
 
     data class Result(
         val rgb: FloatArray,
-        val mask: FloatArray,
+        val dstMask: FloatArray,
+        val srcMask: FloatArray,
         val debugText: String
     )
 
@@ -52,25 +58,36 @@ class LiaeUdEngine(context: Context) {
                 modelFile.absolutePath,
                 OrtSession.SessionOptions()
             )
+
+        /*
+         * Verify the actual model interface at startup.
+         */
+        val inputs = session.inputNames
+
+        require(inputs.size == 1) {
+            "Expected 1 ONNX input, got ${inputs.size}"
+        }
+
+        require(inputs.contains("in_face")) {
+            "Expected ONNX input 'in_face', got $inputs"
+        }
+
+        val outputs = session.outputNames
+
+        require(outputs.size == 3) {
+            "Expected 3 ONNX outputs, got ${outputs.size}"
+        }
     }
 
     fun run(
-        src: FloatArray,
         dst: FloatArray
     ): Result {
 
         require(
-            src.size == SIZE * SIZE * 3
-        ) {
-            "Source tensor size must be " +
-                "${SIZE * SIZE * 3}, got ${src.size}"
-        }
-
-        require(
-            dst.size == SIZE * SIZE * 3
+            dst.size == IMAGE_FLOATS
         ) {
             "Target tensor size must be " +
-                "${SIZE * SIZE * 3}, got ${dst.size}"
+                "$IMAGE_FLOATS, got ${dst.size}"
         }
 
         val inputShape =
@@ -78,14 +95,7 @@ class LiaeUdEngine(context: Context) {
                 1,
                 SIZE.toLong(),
                 SIZE.toLong(),
-                3
-            )
-
-        val srcTensor =
-            OnnxTensor.createTensor(
-                env,
-                FloatBuffer.wrap(src),
-                inputShape
+                CHANNELS.toLong()
             )
 
         val dstTensor =
@@ -99,23 +109,37 @@ class LiaeUdEngine(context: Context) {
 
             session.run(
                 mapOf(
-                    "src" to srcTensor,
-                    "dst" to dstTensor
+                    "in_face" to dstTensor
                 )
             ).use { outputs ->
 
-                val rgbTensor =
+                /*
+                 * Verified ONNX output order:
+                 *
+                 * output_1 = destination mask
+                 * output_2 = swapped face
+                 * output_3 = source/swapped mask
+                 */
+
+                val dstMaskTensor =
                     outputs["output_1"]
                         ?.get() as? OnnxTensor
                         ?: throw IllegalStateException(
-                            "Missing output_1"
+                            "Missing output_1 (destination mask)"
                         )
 
-                val maskTensor =
+                val rgbTensor =
                     outputs["output_2"]
                         ?.get() as? OnnxTensor
                         ?: throw IllegalStateException(
-                            "Missing output_2"
+                            "Missing output_2 (swapped face)"
+                        )
+
+                val srcMaskTensor =
+                    outputs["output_3"]
+                        ?.get() as? OnnxTensor
+                        ?: throw IllegalStateException(
+                            "Missing output_3 (source mask)"
                         )
 
                 val rgb =
@@ -123,21 +147,34 @@ class LiaeUdEngine(context: Context) {
                         rgbTensor.value
                     )
 
-                val mask =
+                val dstMask =
                     flatten(
-                        maskTensor.value
+                        dstMaskTensor.value
+                    )
+
+                val srcMask =
+                    flatten(
+                        srcMaskTensor.value
                     )
 
                 require(
-                    rgb.size == SIZE * SIZE * 3
+                    rgb.size == IMAGE_FLOATS
                 ) {
                     "Unexpected RGB size: ${rgb.size}"
                 }
 
                 require(
-                    mask.size == SIZE * SIZE
+                    dstMask.size == MASK_FLOATS
                 ) {
-                    "Unexpected Mask size: ${mask.size}"
+                    "Unexpected destination mask size: " +
+                        dstMask.size
+                }
+
+                require(
+                    srcMask.size == MASK_FLOATS
+                ) {
+                    "Unexpected source mask size: " +
+                        srcMask.size
                 }
 
                 val rgbMin =
@@ -149,45 +186,65 @@ class LiaeUdEngine(context: Context) {
                 val rgbMean =
                     rgb.average()
 
-                val maskMin =
-                    mask.minOrNull() ?: 0f
+                val dstMaskMin =
+                    dstMask.minOrNull() ?: 0f
 
-                val maskMax =
-                    mask.maxOrNull() ?: 0f
+                val dstMaskMax =
+                    dstMask.maxOrNull() ?: 0f
 
-                val maskMean =
-                    mask.average()
+                val dstMaskMean =
+                    dstMask.average()
+
+                val srcMaskMin =
+                    srcMask.minOrNull() ?: 0f
+
+                val srcMaskMax =
+                    srcMask.maxOrNull() ?: 0f
+
+                val srcMaskMean =
+                    srcMask.average()
 
                 val debugText =
                     String.format(
                         Locale.US,
                         "LIAE DEBUG\n" +
-                            "RGB shape: [1,128,128,3]\n" +
-                            "MASK shape: [1,128,128,1]\n\n" +
-                            "RGB min: %.5f\n" +
-                            "RGB max: %.5f\n" +
-                            "RGB mean: %.5f\n\n" +
-                            "MASK min: %.5f\n" +
-                            "MASK max: %.5f\n" +
-                            "MASK mean: %.5f",
+                            "INPUT: [1,128,128,3]\n\n" +
+                            "SWAPPED FACE\n" +
+                            "shape: [1,128,128,3]\n" +
+                            "min: %.5f\n" +
+                            "max: %.5f\n" +
+                            "mean: %.5f\n\n" +
+                            "DST MASK\n" +
+                            "shape: [1,128,128,1]\n" +
+                            "min: %.5f\n" +
+                            "max: %.5f\n" +
+                            "mean: %.5f\n\n" +
+                            "SRC MASK\n" +
+                            "shape: [1,128,128,1]\n" +
+                            "min: %.5f\n" +
+                            "max: %.5f\n" +
+                            "mean: %.5f",
                         rgbMin,
                         rgbMax,
                         rgbMean,
-                        maskMin,
-                        maskMax,
-                        maskMean
+                        dstMaskMin,
+                        dstMaskMax,
+                        dstMaskMean,
+                        srcMaskMin,
+                        srcMaskMax,
+                        srcMaskMean
                     )
 
                 Result(
                     rgb = rgb,
-                    mask = mask,
+                    dstMask = dstMask,
+                    srcMask = srcMask,
                     debugText = debugText
                 )
             }
 
         } finally {
 
-            srcTensor.close()
             dstTensor.close()
         }
     }
