@@ -129,17 +129,19 @@ class FaceSwapPipeline(
                         targetImage.height
                     )
 
-                val output =
-                    blend(
-                        targetImage,
-                        warpedFace,
-                        warpedMask
+                try {
+
+                    return DflMerger.merge(
+                        background = targetImage,
+                        warpedFace = warpedFace,
+                        warpedMask = warpedMask
                     )
 
-                warpedFace.recycle()
-                warpedMask.recycle()
+                } finally {
 
-                return output
+                    warpedFace.recycle()
+                    warpedMask.recycle()
+                }
 
             } finally {
 
@@ -168,9 +170,11 @@ class FaceSwapPipeline(
         for (i in pixels.indices) {
 
             val alpha =
-                (mask[i]
-                    .coerceIn(0f, 1f) * 255f)
-                    .toInt()
+                (
+                    mask[i]
+                        .coerceIn(0f, 1f) *
+                        255f
+                    ).toInt()
 
             pixels[i] =
                 (alpha shl 24) or
@@ -227,90 +231,6 @@ class FaceSwapPipeline(
         )
 
         return output
-    }
-
-    private fun blend(
-        background: Bitmap,
-        foreground: Bitmap,
-        mask: Bitmap
-    ): Bitmap {
-
-        require(background.width == foreground.width)
-        require(background.height == foreground.height)
-        require(background.width == mask.width)
-        require(background.height == mask.height)
-
-        val width = background.width
-        val height = background.height
-
-        val bg = IntArray(width * height)
-        val fg = IntArray(width * height)
-        val mk = IntArray(width * height)
-        val out = IntArray(width * height)
-
-        background.getPixels(bg, 0, width, 0, 0, width, height)
-        foreground.getPixels(fg, 0, width, 0, 0, width, height)
-        mask.getPixels(mk, 0, width, 0, 0, width, height)
-
-        for (i in out.indices) {
-
-            val alpha =
-                smoothStep(
-                    0.05f,
-                    0.95f,
-                    (mk[i] ushr 24) / 255f
-                )
-
-            val br = (bg[i] shr 16) and 255
-            val bgc = (bg[i] shr 8) and 255
-            val bb = bg[i] and 255
-
-            val fr = (fg[i] shr 16) and 255
-            val fgc = (fg[i] shr 8) and 255
-            val fb = fg[i] and 255
-
-            val r =
-                (br * (1f - alpha) + fr * alpha)
-                    .toInt()
-                    .coerceIn(0, 255)
-
-            val g =
-                (bgc * (1f - alpha) + fgc * alpha)
-                    .toInt()
-                    .coerceIn(0, 255)
-
-            val b =
-                (bb * (1f - alpha) + fb * alpha)
-                    .toInt()
-                    .coerceIn(0, 255)
-
-            out[i] =
-                (0xFF shl 24) or
-                        (r shl 16) or
-                        (g shl 8) or
-                        b
-        }
-
-        return Bitmap.createBitmap(
-            out,
-            width,
-            height,
-            Bitmap.Config.ARGB_8888
-        )
-    }
-
-    private fun smoothStep(
-        edge0: Float,
-        edge1: Float,
-        value: Float
-    ): Float {
-
-        val x =
-            ((value - edge0) /
-                    (edge1 - edge0))
-                .coerceIn(0f, 1f)
-
-        return x * x * (3f - 2f * x)
     }
 
     fun close() {
