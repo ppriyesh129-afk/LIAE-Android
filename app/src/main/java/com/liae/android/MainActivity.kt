@@ -48,7 +48,6 @@ class MainActivity : AppCompatActivity() {
 
         statusText = findViewById(R.id.statusText)
         resultImage = findViewById(R.id.resultImage)
-
         sourceButton = findViewById(R.id.sourceButton)
         targetButton = findViewById(R.id.targetButton)
 
@@ -64,10 +63,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startIfReady() {
-
         val src = sourceBitmap ?: return
         val dst = targetBitmap ?: return
-
         runSwap(src, dst)
     }
 
@@ -79,7 +76,6 @@ class MainActivity : AppCompatActivity() {
         statusText.text = "Preparing..."
 
         thread {
-
             try {
 
                 if (engine == null) {
@@ -105,20 +101,26 @@ class MainActivity : AppCompatActivity() {
                     dst = dstTensor
                 )
 
-                val outputBitmap =
-                    ImageTensor.tensorToBitmap(result.rgb)
+                val rgbBitmap = ImageTensor.tensorToBitmap(result.rgb)
+                val maskBitmap = ImageTensor.maskToBitmap(result.mask)
 
                 runOnUiThread {
 
-                    resultImage.setImageBitmap(outputBitmap)
+                    // Show RGB output (the swapped face)
+                    resultImage.setImageBitmap(rgbBitmap)
 
-                    statusText.text =
-                        """
+                    statusText.text = """
                         LIAE inference complete
 
                         RGB: ${result.rgb.size}
                         Mask: ${result.mask.size}
-                        """.trimIndent()
+
+                        RGB min=${result.rgb.minOrNull()}
+                        RGB max=${result.rgb.maxOrNull()}
+
+                        Mask min=${result.mask.minOrNull()}
+                        Mask max=${result.mask.maxOrNull()}
+                    """.trimIndent()
 
                     sourceButton.isEnabled = true
                     targetButton.isEnabled = true
@@ -128,14 +130,13 @@ class MainActivity : AppCompatActivity() {
 
                 runOnUiThread {
 
-                    statusText.text =
-                        """
+                    statusText.text = """
                         LIAE ERROR
 
                         ${e.javaClass.simpleName}
 
                         ${e.message}
-                        """.trimIndent()
+                    """.trimIndent()
 
                     sourceButton.isEnabled = true
                     targetButton.isEnabled = true
