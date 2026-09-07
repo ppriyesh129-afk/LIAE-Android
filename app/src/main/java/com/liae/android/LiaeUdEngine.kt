@@ -7,10 +7,15 @@ import android.content.Context
 import android.util.Log
 import java.nio.FloatBuffer
 
-class LiaeUdEngine(context: Context) {
+class LiaeUdEngine(
+    context: Context
+) {
 
     companion object {
-        private const val MODEL_NAME = "LIAE_128_80_48_16_fp32.onnx"
+
+        private const val MODEL_NAME =
+            "LIAE_128_80_48_16_fp32.onnx"
+
         private const val SIZE = 128
     }
 
@@ -19,29 +24,39 @@ class LiaeUdEngine(context: Context) {
         val mask: FloatArray
     )
 
-    private val env = OrtEnvironment.getEnvironment()
+    private val env =
+        OrtEnvironment.getEnvironment()
+
     private val session: OrtSession
 
-    var lastRgbShape: LongArray = longArrayOf()
+    var lastRgbShape: LongArray =
+        longArrayOf()
         private set
 
-    var lastMaskShape: LongArray = longArrayOf()
+    var lastMaskShape: LongArray =
+        longArrayOf()
         private set
 
     init {
 
         val modelFile =
-            context.getFileStreamPath(MODEL_NAME)
+            context.getFileStreamPath(
+                MODEL_NAME
+            )
 
         if (!modelFile.exists()) {
 
-            context.assets.open(MODEL_NAME).use { input ->
+            context.assets
+                .open(MODEL_NAME)
+                .use { input ->
 
-                modelFile.outputStream().use { output ->
+                    modelFile
+                        .outputStream()
+                        .use { output ->
 
-                    input.copyTo(output)
+                            input.copyTo(output)
+                        }
                 }
-            }
         }
 
         session =
@@ -56,14 +71,29 @@ class LiaeUdEngine(context: Context) {
         dst: FloatArray
     ): Result {
 
-        require(src.size == SIZE * SIZE * 3) {
-            "Source tensor size must be ${SIZE * SIZE * 3}, got ${src.size}"
+        require(
+            src.size ==
+                SIZE * SIZE * 3
+        ) {
+            "Source tensor size must be " +
+                "${SIZE * SIZE * 3}, got ${src.size}"
         }
 
-        require(dst.size == SIZE * SIZE * 3) {
-            "Target tensor size must be ${SIZE * SIZE * 3}, got ${dst.size}"
+        require(
+            dst.size ==
+                SIZE * SIZE * 3
+        ) {
+            "Target tensor size must be " +
+                "${SIZE * SIZE * 3}, got ${dst.size}"
         }
 
+        /*
+         * VERIFIED MODEL INPUT
+         *
+         * [1, 128, 128, 3]
+         *
+         * NHWC
+         */
         val inputShape =
             longArrayOf(
                 1,
@@ -96,10 +126,20 @@ class LiaeUdEngine(context: Context) {
             ).use { outputs ->
 
                 val rgbTensor =
-                    outputs["output_1"]!!.get() as OnnxTensor
+                    outputs["output_1"]
+                        .orElseThrow {
+                            IllegalStateException(
+                                "Missing output_1"
+                            )
+                        } as OnnxTensor
 
                 val maskTensor =
-                    outputs["output_2"]!!.get() as OnnxTensor
+                    outputs["output_2"]
+                        .orElseThrow {
+                            IllegalStateException(
+                                "Missing output_2"
+                            )
+                        } as OnnxTensor
 
                 lastRgbShape =
                     rgbTensor.info.shape
@@ -109,25 +149,39 @@ class LiaeUdEngine(context: Context) {
 
                 Log.d(
                     "LIAE",
-                    "RGB shape = ${lastRgbShape.contentToString()}"
+                    "RGB shape = " +
+                        lastRgbShape
+                            .contentToString()
                 )
 
                 Log.d(
                     "LIAE",
-                    "Mask shape = ${lastMaskShape.contentToString()}"
+                    "Mask shape = " +
+                        lastMaskShape
+                            .contentToString()
                 )
 
                 val rgb =
-                    flatten(rgbTensor.value)
+                    flatten(
+                        rgbTensor.value
+                    )
 
                 val mask =
-                    flatten(maskTensor.value)
+                    flatten(
+                        maskTensor.value
+                    )
 
-                require(rgb.size == SIZE * SIZE * 3) {
+                require(
+                    rgb.size ==
+                        SIZE * SIZE * 3
+                ) {
                     "Unexpected RGB size: ${rgb.size}"
                 }
 
-                require(mask.size == SIZE * SIZE) {
+                require(
+                    mask.size ==
+                        SIZE * SIZE
+                ) {
                     "Unexpected Mask size: ${mask.size}"
                 }
 
@@ -151,17 +205,21 @@ class LiaeUdEngine(context: Context) {
         val out =
             ArrayList<Float>()
 
-        fun walk(v: Any?) {
+        fun walk(
+            v: Any?
+        ) {
 
             when (v) {
 
                 is FloatArray -> {
+
                     for (f in v) {
                         out.add(f)
                     }
                 }
 
                 is Array<*> -> {
+
                     for (child in v) {
                         walk(child)
                     }
