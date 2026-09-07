@@ -1,5 +1,6 @@
 package com.liae.android
 
+import ai.onnxruntime.OrtEnvironment
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -62,7 +63,6 @@ class MainActivity : AppCompatActivity() {
                             "SOURCE ERROR: " +
                                 (e.message
                                     ?: e.javaClass.simpleName)
-
                     }
                 }
             }
@@ -127,35 +127,24 @@ class MainActivity : AppCompatActivity() {
         )
 
         statusText =
-            findViewById(
-                R.id.statusText
-            )
+            findViewById(R.id.statusText)
 
         resultImage =
-            findViewById(
-                R.id.resultImage
-            )
+            findViewById(R.id.resultImage)
 
         sourceButton =
-            findViewById(
-                R.id.sourceButton
-            )
+            findViewById(R.id.sourceButton)
 
         targetButton =
-            findViewById(
-                R.id.targetButton
-            )
+            findViewById(R.id.targetButton)
 
         targetButton.isEnabled = false
 
-        statusText.text =
-            "Select source face"
+        statusText.text = "Select source face"
 
         sourceButton.setOnClickListener {
 
-            sourcePicker.launch(
-                "image/*"
-            )
+            sourcePicker.launch("image/*")
         }
 
         targetButton.setOnClickListener {
@@ -168,9 +157,7 @@ class MainActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
 
-            targetPicker.launch(
-                "image/*"
-            )
+            targetPicker.launch("image/*")
         }
     }
 
@@ -186,9 +173,7 @@ class MainActivity : AppCompatActivity() {
                     return null
                 }
 
-                BitmapFactory.decodeStream(
-                    input
-                )
+                BitmapFactory.decodeStream(input)
             }
     }
 
@@ -211,20 +196,39 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
 
                 statusText.text =
-                    "Loading LIAE-UD + YuNet..."
+                    "Loading BlazeFace + LIAE..."
             }
 
             if (pipeline == null) {
 
-                val detector =
-                    YuNetDetector(
-                        this@MainActivity
+                val modelFile =
+                    getFileStreamPath("blazeface.onnx")
+
+                if (!modelFile.exists()) {
+
+                    assets.open("blazeface.onnx").use { input ->
+
+                        modelFile.outputStream().use { output ->
+
+                            input.copyTo(output)
+                        }
+                    }
+                }
+
+                val env =
+                    OrtEnvironment.getEnvironment()
+
+                val blazeSession =
+                    env.createSession(
+                        modelFile.absolutePath,
+                        ai.onnxruntime.OrtSession.SessionOptions()
                     )
 
+                val detector =
+                    BlazeFaceDetector(blazeSession)
+
                 val liae =
-                    LiaeUdEngine(
-                        this@MainActivity
-                    )
+                    LiaeUdEngine(this)
 
                 pipeline =
                     FaceSwapPipeline(
@@ -248,7 +252,7 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
 
                 statusText.text =
-                    "Running LIAE-UD face swap..."
+                    "Running LIAE face swap..."
             }
 
             val result =
@@ -265,8 +269,7 @@ class MainActivity : AppCompatActivity() {
 
                 statusText.text =
                     "Face swap complete\n" +
-                        "Faces detected: " +
-                        result.facesDetected
+                        "Faces detected: ${result.facesDetected}"
 
                 sourceButton.isEnabled = true
                 targetButton.isEnabled = true
