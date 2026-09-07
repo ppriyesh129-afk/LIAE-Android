@@ -1,6 +1,11 @@
 package com.liae.android
 
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.PorterDuff
 
 class FaceSwapPipeline(
     private val detector: BlazeFaceDetector,
@@ -34,15 +39,26 @@ class FaceSwapPipeline(
         val sourceFace = sourceFaces.maxByOrNull { it.score }
             ?: throw IllegalStateException("Source face selection failed")
 
-        val debugBitmap = swapOneFace(
-            sourceImage = sourceImage,
-            sourceFace = sourceFace,
-            targetImage = targetImage,
-            targetFace = targetFaces.first()
-        )
+        var result = targetImage.copy(Bitmap.Config.ARGB_8888, true)
+
+        for (targetFace in targetFaces) {
+
+            val next = swapOneFace(
+                sourceImage = sourceImage,
+                sourceFace = sourceFace,
+                targetImage = result,
+                targetFace = targetFace
+            )
+
+            if (next !== result) {
+                result.recycle()
+            }
+
+            result = next
+        }
 
         return Result(
-            bitmap = debugBitmap,
+            bitmap = result,
             facesDetected = targetFaces.size,
             debugText = lastDebugText
         )
@@ -72,19 +88,56 @@ class FaceSwapPipeline(
             val swappedFace =
                 ImageTensor.tensorToBitmap(prediction.rgb)
 
-            /*
-             * DEBUG MODE
-             *
-             * Return the raw 128×128 ONNX output.
-             *
-             * No warp.
-             * No mask.
-             * No blending.
-             */
-            return swappedFace.copy(
-                Bitmap.Config.ARGB_8888,
-                false
-            )
+            val mask =
+                ImageTensor.maskToBitmap(prediction.dstMask)
+
+            try {
+
+                val warpedFace =
+                    warpToTarget(
+                        alignedFace = swappedFace,
+                        inverse = alignedTarget.inverse,
+                        targetWidth = targetImage.width,
+                        targetHeight = targetImage.height
+                    )
+
+                val warpedMask =
+                    warpToTarget(
+                        alignedFace = mask,
+                        inverse = alignedTarget.inverse,
+                        targetWidth = targetImage.width,
+                        targetHeight = targetImage.height
+                    )
+
+                try {
+
+                    return DflMerger.merge(
+                        background = targetImage,
+                        warpedFace = warpedFace,
+                        warpedMask = warpedMask
+                    )
+
+                } finally {
+
+                    if (!warpedFace.isRecycled) {
+                        warpedFace.recycle()
+                    }
+
+                    if (!warpedMask.isRecycled) {
+                        warpedMask.recycle()
+                    }
+                }
+
+            } finally {
+
+                if (!swappedFace.isRecycled) {
+                    swappedFace.recycle()
+                }
+
+                if (!mask.isRecycled) {
+                    mask.recycle()
+                }
+            }
 
         } finally {
 
@@ -96,6 +149,56 @@ class FaceSwapPipeline(
                 alignedTarget.bitmap.recycle()
             }
         }
+    }
+
+    private fun warpToTarget(
+        alignedFace: Bitmap,
+        inverse: FloatArray,
+        targetWidth: Int,
+        targetHeight: Int
+    ): Bitmap {
+
+        require(inverse.size == 6) {
+            "Expected 6-value affine inverse matrix, got ${inverse.size}"
+        }
+
+        val matrix = Matrix()
+
+        matrix.setValues(
+            floatArrayOf(
+                inverse[0], inverse[1], inverse[2],
+                inverse[3], inverse[4], inverse[5],
+                0f, 0f, 1f
+            )
+        )
+
+        val output = Bitmap.createBitmap(
+            targetWidth,
+            targetHeight,
+            Bitmap.Config.ARGB_8888
+        )
+
+        val canvas = Canvas(output)
+
+        canvas.drawColor(
+            Color.TRANSPARENT,
+            PorterDuff.Mode.CLEAR
+        )
+
+        val paint = Paint(
+            Paint.ANTI_ALIAS_FLAG or
+                Paint.FILTER_BITMAP_FLAG
+        )
+
+        paint.isFilterBitmap = true
+
+        canvas.drawBitmap(
+            alignedFace,
+            matrix,
+            paint
+        )
+
+        return output
     }
 
     fun close() {
