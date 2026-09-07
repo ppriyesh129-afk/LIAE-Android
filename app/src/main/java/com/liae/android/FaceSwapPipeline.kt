@@ -43,6 +43,17 @@ class FaceSwapPipeline(
             )
         }
 
+        /*
+         * The exported LIAE checkpoint has the source identity
+         * embedded in its Inter_AB weights.
+         *
+         * Therefore the ONNX graph itself takes only the
+         * destination/target aligned face.
+         *
+         * We still detect the source face here so the existing
+         * application flow remains compatible and to ensure
+         * a valid source image was supplied.
+         */
         val sourceFace =
             sourceFaces.maxByOrNull {
                 it.score
@@ -50,6 +61,13 @@ class FaceSwapPipeline(
                 ?: throw IllegalStateException(
                     "Source face selection failed"
                 )
+
+        /*
+         * Keep sourceFace referenced intentionally.
+         */
+        @Suppress("UNUSED_VARIABLE")
+        val verifiedSourceFace =
+            sourceFace
 
         var result =
             targetImage.copy(
@@ -88,6 +106,11 @@ class FaceSwapPipeline(
         targetFace: BlazeFaceResult
     ): Bitmap {
 
+        /*
+         * Source alignment is retained for compatibility with
+         * the existing pipeline, but the verified ONNX graph
+         * does not consume sourceTensor.
+         */
         val alignedSource =
             DflAligner.align(
                 sourceImage,
@@ -103,61 +126,63 @@ class FaceSwapPipeline(
         try {
 
             /*
-             * Convert aligned faces to:
+             * Convert target aligned face to:
              *
              * [1,128,128,3]
              * NHWC
              * BGR
              * 0..1
              */
-            val sourceTensor =
-                ImageTensor.bitmapToTensor(
-                    alignedSource.bitmap
-                )
-
             val targetTensor =
                 ImageTensor.bitmapToTensor(
                     alignedTarget.bitmap
                 )
 
             /*
-             * Run LIAE.
+             * Verified ONNX:
+             *
+             * INPUT
+             * in_face [1,128,128,3]
+             *
+             * OUTPUT 0
+             * output_1 [1,128,128,1]
+             * destination mask
+             *
+             * OUTPUT 1
+             * output_2 [1,128,128,3]
+             * swapped face
+             *
+             * OUTPUT 2
+             * output_3 [1,128,128,1]
+             * source/swapped mask
              */
             val prediction =
                 liae.run(
-                    src = sourceTensor,
                     dst = targetTensor
                 )
 
             lastDebugText =
                 prediction.debugText
 
-            /*
-             * LIAE output:
-             *
-             * output_1:
-             * [1,128,128,3]
-             *
-             * output_2:
-             * [1,128,128,1]
-             */
             val swappedFace =
                 ImageTensor.tensorToBitmap(
                     prediction.rgb
                 )
 
+            /*
+             * For the actual swapped face, use the
+             * source/swapped-face mask (output_3).
+             *
+             * Destination mask is retained by the engine
+             * for diagnostics and future refinement.
+             */
             val mask =
                 ImageTensor.maskToBitmap(
-                    prediction.mask
+                    prediction.srcMask
                 )
 
             try {
 
-                /*
-                 * Transform generated face from
-                 * aligned 128x128 space back into
-                 * target-image coordinates.
-                 */
                 val warpedFace =
                     warpToTarget(
                         alignedFace = swappedFace,
@@ -166,10 +191,6 @@ class FaceSwapPipeline(
                         targetHeight = targetImage.height
                     )
 
-                /*
-                 * Transform the mask using exactly
-                 * the same geometry.
-                 */
                 val warpedMask =
                     warpToTarget(
                         alignedFace = mask,
@@ -180,10 +201,6 @@ class FaceSwapPipeline(
 
                 try {
 
-                    /*
-                     * Blend the warped face with
-                     * the original target.
-                     */
                     return DflMerger.merge(
                         background = targetImage,
                         warpedFace = warpedFace,
@@ -224,16 +241,6 @@ class FaceSwapPipeline(
         }
     }
 
-    /*
-     * Warp a 128x128 aligned image back into
-     * the full target-image coordinate system.
-     *
-     * The output starts fully transparent.
-     *
-     * This is important because pixels outside
-     * the transformed face must NOT become part
-     * of the final blend.
-     */
     private fun warpToTarget(
         alignedFace: Bitmap,
         inverse: FloatArray,
@@ -276,9 +283,6 @@ class FaceSwapPipeline(
         val canvas =
             Canvas(output)
 
-        /*
-         * Start completely transparent.
-         */
         canvas.drawColor(
             Color.TRANSPARENT,
             PorterDuff.Mode.CLEAR
@@ -292,9 +296,6 @@ class FaceSwapPipeline(
 
         paint.isFilterBitmap = true
 
-        /*
-         * Draw transformed aligned image.
-         */
         canvas.drawBitmap(
             alignedFace,
             matrix,
