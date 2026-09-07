@@ -1,4 +1,4 @@
-package com.profaceswap
+package com.liae.android
 
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
