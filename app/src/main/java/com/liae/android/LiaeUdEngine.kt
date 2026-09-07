@@ -22,6 +22,12 @@ class LiaeUdEngine(context: Context) {
     private val env = OrtEnvironment.getEnvironment()
     private val session: OrtSession
 
+    var lastRgbShape: LongArray = longArrayOf()
+        private set
+
+    var lastMaskShape: LongArray = longArrayOf()
+        private set
+
     init {
         val modelFile = context.getFileStreamPath(MODEL_NAME)
 
@@ -41,24 +47,19 @@ class LiaeUdEngine(context: Context) {
 
     fun run(src: FloatArray, dst: FloatArray): Result {
 
-        // DeepFaceLab LIAE ONNX input: NHWC (1,128,128,3)
-        val shape = longArrayOf(
-            1,
-            SIZE.toLong(),
-            SIZE.toLong(),
-            3
-        )
+        // ONNX model input: NHWC (1,128,128,3)
+        val inputShape = longArrayOf(1, SIZE.toLong(), SIZE.toLong(), 3)
 
         val srcTensor = OnnxTensor.createTensor(
             env,
             FloatBuffer.wrap(src),
-            shape
+            inputShape
         )
 
         val dstTensor = OnnxTensor.createTensor(
             env,
             FloatBuffer.wrap(dst),
-            shape
+            inputShape
         )
 
         return try {
@@ -73,15 +74,11 @@ class LiaeUdEngine(context: Context) {
                 val rgbTensor = outputs[0] as OnnxTensor
                 val maskTensor = outputs[1] as OnnxTensor
 
-                Log.d(
-                    "LIAE",
-                    "RGB shape = ${rgbTensor.info.shape.contentToString()}"
-                )
+                lastRgbShape = rgbTensor.info.shape
+                lastMaskShape = maskTensor.info.shape
 
-                Log.d(
-                    "LIAE",
-                    "Mask shape = ${maskTensor.info.shape.contentToString()}"
-                )
+                Log.d("LIAE", "RGB shape = ${lastRgbShape.contentToString()}")
+                Log.d("LIAE", "Mask shape = ${lastMaskShape.contentToString()}")
 
                 Result(
                     flatten(rgbTensor.value),
