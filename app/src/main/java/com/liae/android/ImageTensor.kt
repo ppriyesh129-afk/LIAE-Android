@@ -15,10 +15,13 @@ object ImageTensor {
         SIZE * SIZE
 
     /*
-     * Bitmap -> NHWC float tensor
+     * Bitmap -> NHWC RGB tensor
      *
-     * Output:
+     * Shape:
      * [1, 128, 128, 3]
+     *
+     * Layout:
+     * RGB RGB RGB RGB ...
      *
      * Range:
      * 0.0 .. 1.0
@@ -45,7 +48,9 @@ object ImageTensor {
         try {
 
             val pixels =
-                IntArray(SIZE * SIZE)
+                IntArray(
+                    SIZE * SIZE
+                )
 
             resized.getPixels(
                 pixels,
@@ -58,7 +63,9 @@ object ImageTensor {
             )
 
             val tensor =
-                FloatArray(IMAGE_FLOATS)
+                FloatArray(
+                    IMAGE_FLOATS
+                )
 
             var index = 0
 
@@ -78,7 +85,8 @@ object ImageTensor {
 
         } finally {
 
-            if (resized !== bitmap &&
+            if (
+                resized !== bitmap &&
                 !resized.isRecycled
             ) {
                 resized.recycle()
@@ -87,13 +95,13 @@ object ImageTensor {
     }
 
     /*
-     * NHWC RGB tensor -> 128x128 Bitmap
+     * NHWC RGB tensor -> Bitmap
      *
      * Input:
      * [1, 128, 128, 3]
      *
-     * Range:
-     * 0.0 .. 1.0
+     * Layout:
+     * RGB RGB RGB ...
      */
     fun tensorToBitmap(
         tensor: FloatArray
@@ -106,7 +114,9 @@ object ImageTensor {
         }
 
         val pixels =
-            IntArray(SIZE * SIZE)
+            IntArray(
+                SIZE * SIZE
+            )
 
         var index = 0
 
@@ -150,16 +160,12 @@ object ImageTensor {
     }
 
     /*
-     * LIAE mask -> 128x128 grayscale Bitmap
+     * LIAE mask -> Bitmap
      *
-     * Input:
+     * Model:
      * [1, 128, 128, 1]
      *
-     * Range:
-     * 0.0 .. 1.0
-     *
-     * The mask is stored as RGB grayscale.
-     * DflMerger receives it as warpedMask.
+     * Mask value is stored in Alpha.
      */
     fun maskToBitmap(
         mask: FloatArray
@@ -172,7 +178,9 @@ object ImageTensor {
         }
 
         val pixels =
-            IntArray(MASK_FLOATS)
+            IntArray(
+                MASK_FLOATS
+            )
 
         for (i in pixels.indices) {
 
@@ -180,14 +188,15 @@ object ImageTensor {
                 (
                     mask[i]
                         .coerceIn(0.0f, 1.0f) *
-                        255.0f
+                    255.0f
                 ).toInt()
 
             pixels[i] =
-                Color.rgb(
+                Color.argb(
                     value,
-                    value,
-                    value
+                    255,
+                    255,
+                    255
                 )
         }
 
