@@ -14,10 +14,19 @@ class YuNetDetector(
 ) {
 
     companion object {
+
         private const val MODEL_NAME =
             "face_detection_yunet_2023mar.onnx"
 
-        private const val INPUT_SIZE = 320
+        /*
+         * This YuNet ONNX expects:
+         *
+         * [1, 3, 640, 640]
+         *
+         * NCHW
+         */
+
+        private const val INPUT_SIZE = 640
 
         private const val SCORE_THRESHOLD = 0.6f
         private const val NMS_THRESHOLD = 0.3f
@@ -51,19 +60,26 @@ class YuNetDetector(
     init {
 
         val modelFile =
-            context.getFileStreamPath(MODEL_NAME)
+            context.getFileStreamPath(
+                MODEL_NAME
+            )
 
-        if (!modelFile.exists() ||
+        if (
+            !modelFile.exists() ||
             modelFile.length() < 100_000L
         ) {
 
-            context.assets.open(MODEL_NAME).use { input ->
+            context.assets
+                .open(MODEL_NAME)
+                .use { input ->
 
-                modelFile.outputStream().use { output ->
+                    modelFile
+                        .outputStream()
+                        .use { output ->
 
-                    input.copyTo(output)
+                            input.copyTo(output)
+                        }
                 }
-            }
         }
 
         require(
@@ -96,6 +112,9 @@ class YuNetDetector(
         val originalHeight =
             bitmap.height.toFloat()
 
+        /*
+         * Resize image to 640x640.
+         */
         val resized =
             Bitmap.createScaledBitmap(
                 bitmap,
@@ -120,29 +139,37 @@ class YuNetDetector(
         )
 
         /*
-         * YuNet expects BGR pixel values.
+         * NCHW input:
          *
-         * No /255 normalization.
-         * Values remain in the 0..255 range.
+         * channel 0 = B
+         * channel 1 = G
+         * channel 2 = R
+         *
+         * Layout:
+         *
+         * [BBBB...][GGGG...][RRRR...]
          */
+
+        val planeSize =
+            INPUT_SIZE * INPUT_SIZE
 
         val input =
             FloatArray(
-                INPUT_SIZE *
-                    INPUT_SIZE *
-                    3
+                planeSize * 3
             )
 
-        var index = 0
+        var pixelIndex = 0
 
-        for (y in 0 until INPUT_SIZE) {
+        for (
+            y in 0 until INPUT_SIZE
+        ) {
 
-            for (x in 0 until INPUT_SIZE) {
+            for (
+                x in 0 until INPUT_SIZE
+            ) {
 
                 val pixel =
-                    pixels[
-                        y * INPUT_SIZE + x
-                    ]
+                    pixels[pixelIndex++]
 
                 val r =
                     ((pixel shr 16) and 0xFF)
@@ -156,9 +183,21 @@ class YuNetDetector(
                     (pixel and 0xFF)
                         .toFloat()
 
-                input[index++] = b
-                input[index++] = g
-                input[index++] = r
+                val position =
+                    y * INPUT_SIZE + x
+
+                input[position] =
+                    b
+
+                input[
+                    planeSize + position
+                ] =
+                    g
+
+                input[
+                    planeSize * 2 + position
+                ] =
+                    r
             }
         }
 
@@ -172,9 +211,9 @@ class YuNetDetector(
                 FloatBuffer.wrap(input),
                 longArrayOf(
                     1,
+                    3,
                     INPUT_SIZE.toLong(),
-                    INPUT_SIZE.toLong(),
-                    3
+                    INPUT_SIZE.toLong()
                 )
             )
 
@@ -190,18 +229,8 @@ class YuNetDetector(
             ).use { result ->
 
                 /*
-                 * IMPORTANT:
-                 *
-                 * Use positional output access.
-                 * Do not use:
-                 *
-                 * result[outputName].value
-                 *
-                 * because this produces the Kotlin
-                 * unresolved-reference error with
-                 * the current ONNX Runtime API.
+                 * Positional output access.
                  */
-
                 val raw =
                     result[0].value
 
@@ -228,22 +257,25 @@ class YuNetDetector(
     ): List<Face> {
 
         /*
-         * YuNet output:
+         * YuNet detection format:
          *
-         * [x, y, w, h,
-         *  right_eye_x, right_eye_y,
-         *  left_eye_x, left_eye_y,
-         *  nose_x, nose_y,
-         *  right_mouth_x, right_mouth_y,
-         *  left_mouth_x, left_mouth_y,
-         *  score]
-         *
-         * 15 values per detection.
+         * x
+         * y
+         * width
+         * height
+         * right eye x/y
+         * left eye x/y
+         * nose x/y
+         * right mouth x/y
+         * left mouth x/y
+         * score
          */
 
         val stride = 15
 
-        if (values.size % stride != 0) {
+        if (
+            values.size % stride != 0
+        ) {
 
             throw IllegalStateException(
                 "Unexpected YuNet output size: " +
@@ -272,7 +304,9 @@ class YuNetDetector(
             val score =
                 values[offset + 14]
 
-            if (score >= SCORE_THRESHOLD) {
+            if (
+                score >= SCORE_THRESHOLD
+            ) {
 
                 val x =
                     values[offset] *
@@ -361,14 +395,18 @@ class YuNetDetector(
         }
 
         val sorted =
-            faces.sortedByDescending {
-                it.score
-            }.toMutableList()
+            faces
+                .sortedByDescending {
+                    it.score
+                }
+                .toMutableList()
 
         val selected =
             ArrayList<Face>()
 
-        while (sorted.isNotEmpty()) {
+        while (
+            sorted.isNotEmpty()
+        ) {
 
             val best =
                 sorted.removeAt(0)
@@ -378,15 +416,20 @@ class YuNetDetector(
             val iterator =
                 sorted.iterator()
 
-            while (iterator.hasNext()) {
+            while (
+                iterator.hasNext()
+            ) {
 
                 val candidate =
                     iterator.next()
 
                 if (
-                    iou(best, candidate) >
-                    NMS_THRESHOLD
+                    iou(
+                        best,
+                        candidate
+                    ) > NMS_THRESHOLD
                 ) {
+
                     iterator.remove()
                 }
             }
@@ -465,7 +508,9 @@ class YuNetDetector(
                 areaB -
                 intersection
 
-        if (union <= 0f) {
+        if (
+            union <= 0f
+        ) {
             return 0f
         }
 
@@ -502,7 +547,9 @@ class YuNetDetector(
 
                         is Array<*> -> {
 
-                            for (child in item) {
+                            for (
+                                child in item
+                            ) {
                                 collect(child)
                             }
                         }
@@ -522,7 +569,7 @@ class YuNetDetector(
 
                 throw IllegalStateException(
                     "Unsupported YuNet output type: " +
-                        value::class.java.name
+                        value.javaClass.name
                 )
             }
         }
