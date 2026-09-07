@@ -14,6 +14,7 @@ class LiaeUdEngine(context: Context) {
 
         private const val SIZE = 128
         private const val CHANNELS = 3
+
         private const val IMAGE_FLOATS = SIZE * SIZE * CHANNELS
         private const val MASK_FLOATS = SIZE * SIZE
     }
@@ -45,12 +46,15 @@ class LiaeUdEngine(context: Context) {
             OrtSession.SessionOptions()
         )
 
-        // Verify exported ONNX interface.
         require(session.inputNames == setOf("in_face")) {
             "Expected ONNX input 'in_face', got ${session.inputNames}"
         }
 
-        require(session.outputNames.containsAll(setOf("output_1", "output_2", "output_3"))) {
+        require(
+            session.outputNames.containsAll(
+                setOf("output_1", "output_2", "output_3")
+            )
+        ) {
             "Unexpected ONNX outputs: ${session.outputNames}"
         }
     }
@@ -58,7 +62,7 @@ class LiaeUdEngine(context: Context) {
     fun run(dst: FloatArray): Result {
 
         require(dst.size == IMAGE_FLOATS) {
-            "Target tensor size must be $IMAGE_FLOATS, got ${dst.size}"
+            "Expected $IMAGE_FLOATS floats, got ${dst.size}"
         }
 
         val inputShape = longArrayOf(
@@ -68,7 +72,7 @@ class LiaeUdEngine(context: Context) {
             CHANNELS.toLong()
         )
 
-        val inFaceTensor = OnnxTensor.createTensor(
+        val inputTensor = OnnxTensor.createTensor(
             env,
             FloatBuffer.wrap(dst),
             inputShape
@@ -77,13 +81,8 @@ class LiaeUdEngine(context: Context) {
         return try {
 
             session.run(
-                mapOf("in_face" to inFaceTensor)
+                mapOf("in_face" to inputTensor)
             ).use { outputs ->
-
-                // Verified output order:
-                // output_1 = destination mask
-                // output_2 = swapped face
-                // output_3 = source mask
 
                 val dstMaskTensor =
                     outputs["output_1"]?.get() as? OnnxTensor
@@ -97,43 +96,45 @@ class LiaeUdEngine(context: Context) {
                     outputs["output_3"]?.get() as? OnnxTensor
                         ?: error("Missing output_3")
 
-                val rgb = flatten(rgbTensor.value)
-                val dstMask = flatten(dstMaskTensor.value)
-                val srcMask = flatten(srcMaskTensor.value)
+                val rgb =
+                    extractRgb(rgbTensor.value)
 
-                require(rgb.size == IMAGE_FLOATS)
-                require(dstMask.size == MASK_FLOATS)
-                require(srcMask.size == MASK_FLOATS)
+                val dstMask =
+                    extractMask(dstMaskTensor.value)
 
-                val debugText = String.format(
-                    Locale.US,
-                    "LIAE DEBUG\n" +
-                        "INPUT: [1,128,128,3]\n\n" +
-                        "SWAPPED FACE\n" +
-                        "shape: [1,128,128,3]\n" +
-                        "min: %.5f\n" +
-                        "max: %.5f\n" +
-                        "mean: %.5f\n\n" +
-                        "DST MASK\n" +
-                        "shape: [1,128,128,1]\n" +
-                        "min: %.5f\n" +
-                        "max: %.5f\n" +
-                        "mean: %.5f\n\n" +
-                        "SRC MASK\n" +
-                        "shape: [1,128,128,1]\n" +
-                        "min: %.5f\n" +
-                        "max: %.5f\n" +
-                        "mean: %.5f",
-                    rgb.minOrNull() ?: 0f,
-                    rgb.maxOrNull() ?: 0f,
-                    rgb.average(),
-                    dstMask.minOrNull() ?: 0f,
-                    dstMask.maxOrNull() ?: 0f,
-                    dstMask.average(),
-                    srcMask.minOrNull() ?: 0f,
-                    srcMask.maxOrNull() ?: 0f,
-                    srcMask.average()
-                )
+                val srcMask =
+                    extractMask(srcMaskTensor.value)
+
+                val debugText =
+                    String.format(
+                        Locale.US,
+                        "LIAE DEBUG\n" +
+                            "INPUT: [1,128,128,3]\n\n" +
+                            "SWAPPED FACE\n" +
+                            "shape: [1,128,128,3]\n" +
+                            "min: %.5f\n" +
+                            "max: %.5f\n" +
+                            "mean: %.5f\n\n" +
+                            "DST MASK\n" +
+                            "shape: [1,128,128,1]\n" +
+                            "min: %.5f\n" +
+                            "max: %.5f\n" +
+                            "mean: %.5f\n\n" +
+                            "SRC MASK\n" +
+                            "shape: [1,128,128,1]\n" +
+                            "min: %.5f\n" +
+                            "max: %.5f\n" +
+                            "mean: %.5f",
+                        rgb.minOrNull() ?: 0f,
+                        rgb.maxOrNull() ?: 0f,
+                        rgb.average(),
+                        dstMask.minOrNull() ?: 0f,
+                        dstMask.maxOrNull() ?: 0f,
+                        dstMask.average(),
+                        srcMask.minOrNull() ?: 0f,
+                        srcMask.maxOrNull() ?: 0f,
+                        srcMask.average()
+                    )
 
                 Result(
                     rgb = rgb,
@@ -144,23 +145,62 @@ class LiaeUdEngine(context: Context) {
             }
 
         } finally {
-            inFaceTensor.close()
+            inputTensor.close()
         }
     }
 
-    private fun flatten(value: Any): FloatArray {
+    /**
+     * Reads output_2 as NHWC:
+     * [1][128][128][3]
+     */
+    private fun extractRgb(value: Any): FloatArray {
 
-        val out = ArrayList<Float>()
+        val tensor =
+            value as Array<Array<Array<FloatArray>>>
 
-        fun walk(v: Any?) {
-            when (v) {
-                is FloatArray -> out.addAll(v.toList())
-                is Array<*> -> v.forEach { walk(it) }
+        val batch = tensor[0]
+
+        val out = FloatArray(IMAGE_FLOATS)
+
+        var i = 0
+
+        for (y in 0 until SIZE) {
+            for (x in 0 until SIZE) {
+
+                val p = batch[y][x]
+
+                out[i++] = p[0]
+                out[i++] = p[1]
+                out[i++] = p[2]
             }
         }
 
-        walk(value)
-        return out.toFloatArray()
+        return out
+    }
+
+    /**
+     * Reads output_1/output_3 as NHWC:
+     * [1][128][128][1]
+     */
+    private fun extractMask(value: Any): FloatArray {
+
+        val tensor =
+            value as Array<Array<Array<FloatArray>>>
+
+        val batch = tensor[0]
+
+        val out = FloatArray(MASK_FLOATS)
+
+        var i = 0
+
+        for (y in 0 until SIZE) {
+            for (x in 0 until SIZE) {
+
+                out[i++] = batch[y][x][0]
+            }
+        }
+
+        return out
     }
 
     fun close() {
