@@ -3,6 +3,10 @@ name: Build LIAE Android APK
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   build:
     runs-on: ubuntu-22.04
@@ -10,266 +14,15 @@ jobs:
     steps:
 
       # --------------------------------------------------
-      # 1. Checkout Android project
+      # 1. Checkout LIAE-Android
       # --------------------------------------------------
 
-      - name: Checkout LIAE Android
+      - name: Checkout LIAE-Android
         uses: actions/checkout@v4
 
 
       # --------------------------------------------------
-      # 2. Checkout conversion project
-      # --------------------------------------------------
-
-      - name: Checkout SAEHD conversion tools
-        uses: actions/checkout@v4
-        with:
-          repository: ppriyesh129-afk/SAEHD-Android
-          path: conversion
-
-
-      # --------------------------------------------------
-      # 3. Checkout DeepFaceLab source
-      # --------------------------------------------------
-
-      - name: Checkout DeepFaceLab
-        uses: actions/checkout@v4
-        with:
-          repository: iperov/DeepFaceLab
-          path: third_party/DeepFaceLab
-
-
-      # --------------------------------------------------
-      # 4. Setup Python
-      # --------------------------------------------------
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-
-
-      # --------------------------------------------------
-      # 5. Install conversion dependencies
-      # --------------------------------------------------
-
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-
-          pip install --force-reinstall \
-            "numpy==1.26.4" \
-            "tensorflow==2.15.1" \
-            "tf2onnx==1.16.1" \
-            "onnx==1.16.2" \
-            "onnxruntime==1.18.1"
-
-
-      # --------------------------------------------------
-      # 6. Copy verified converter
-      # --------------------------------------------------
-
-      - name: Copy conversion tools
-        run: |
-          mkdir -p tools
-          mkdir -p converter
-
-          cp conversion/tools/derive_liae.py tools/
-          cp conversion/tools/inspect_model.py tools/
-
-          cp conversion/converter/model.py converter/
-          cp conversion/converter/test_inference.py converter/
-          cp conversion/converter/export_onnx.py converter/
-          cp conversion/converter/verify_onnx.py converter/
-
-          echo "===== TOOLS ====="
-          ls -lh tools
-
-          echo "===== CONVERTER ====="
-          ls -lh converter
-
-
-      # --------------------------------------------------
-      # 7. Download official LIAE checkpoint
-      # --------------------------------------------------
-
-      - name: Download official LIAE checkpoint
-        run: |
-          mkdir -p model
-
-          wget -O /tmp/LIAE.zip \
-            "https://sourceforge.net/projects/deepfacelab.mirror/files/pretrained/LIAE.f-128-80-48-16-1.000.000.zip/download"
-
-          ls -lh /tmp/LIAE.zip
-
-
-      # --------------------------------------------------
-      # 8. Extract checkpoint
-      # --------------------------------------------------
-
-      - name: Extract checkpoint
-        run: |
-          unzip -o /tmp/LIAE.zip -d model
-
-          echo "===== MODEL FILES ====="
-          find model -type f -print
-
-
-      # --------------------------------------------------
-      # 9. Inspect checkpoint layout
-      # --------------------------------------------------
-
-      - name: Inspect checkpoint
-        run: |
-          echo "===== MODEL DIRECTORY ====="
-          find model -maxdepth 5 -type f -print
-
-
-      # --------------------------------------------------
-      # 10. Verify DeepFaceLab source
-      # --------------------------------------------------
-
-      - name: Verify DeepFaceLab source
-        run: |
-          test -f \
-            third_party/DeepFaceLab/core/leras/archis/DeepFakeArchi.py
-
-          echo "✓ DeepFaceLab source found"
-
-
-      # --------------------------------------------------
-      # 11. Derive LIAE architecture
-      # --------------------------------------------------
-
-      - name: Derive LIAE
-        run: |
-          python tools/derive_liae.py
-
-
-      # --------------------------------------------------
-      # 12. Inspect weights
-      # --------------------------------------------------
-
-      - name: Inspect weights
-        run: |
-          python tools/inspect_model.py
-
-
-      # --------------------------------------------------
-      # 13. TensorFlow inference test
-      # --------------------------------------------------
-
-      - name: Test TensorFlow inference
-        run: |
-          python converter/test_inference.py
-
-
-      # --------------------------------------------------
-      # 14. Export FP32 ONNX
-      # --------------------------------------------------
-
-      - name: Export FP32 ONNX
-        run: |
-          python converter/export_onnx.py
-
-
-      # --------------------------------------------------
-      # 15. Verify ONNX
-      # --------------------------------------------------
-
-      - name: Verify ONNX
-        run: |
-          python converter/verify_onnx.py
-
-
-      # --------------------------------------------------
-      # 16. HARD CHECK ONNX INPUTS
-      # --------------------------------------------------
-
-      - name: Check ONNX graph inputs
-        run: |
-          python - <<'PY'
-
-          import onnx
-
-          path = "converter/output/LIAE_128_80_48_16_fp32.onnx"
-
-          print("Loading:", path)
-
-          model = onnx.load(path)
-
-          print()
-          print("===== GRAPH INPUTS =====")
-
-          inputs = []
-
-          for x in model.graph.input:
-              print(" -", x.name)
-              inputs.append(x.name)
-
-          print()
-          print("===== GRAPH OUTPUTS =====")
-
-          for x in model.graph.output:
-              print(" -", x.name)
-
-          print()
-          print("===== VALIDATION =====")
-
-          if set(inputs) != {"src", "dst"}:
-              raise RuntimeError(
-                  "INVALID ONNX GRAPH INPUTS: "
-                  + str(inputs)
-              )
-
-          print("✓ ONLY src AND dst ARE GRAPH INPUTS")
-
-          PY
-
-
-      # --------------------------------------------------
-      # 17. Check ONNX size
-      # --------------------------------------------------
-
-      - name: Check ONNX file size
-        run: |
-          ls -lh \
-            converter/output/LIAE_128_80_48_16_fp32.onnx
-
-          SIZE=$(stat -c%s \
-            converter/output/LIAE_128_80_48_16_fp32.onnx)
-
-          echo "ONNX bytes: $SIZE"
-
-          if [ "$SIZE" -lt 10000000 ]; then
-            echo "ERROR: ONNX is suspiciously small"
-            exit 1
-          fi
-
-          echo "✓ ONNX size looks valid"
-
-
-      # --------------------------------------------------
-      # 18. Copy FULL ONNX into Android assets
-      # --------------------------------------------------
-
-      - name: Copy ONNX into Android assets
-        run: |
-          mkdir -p app/src/main/assets
-
-          rm -f \
-            app/src/main/assets/LIAE_128_80_48_16_fp32.onnx
-
-          cp \
-            converter/output/LIAE_128_80_48_16_fp32.onnx \
-            app/src/main/assets/LIAE_128_80_48_16_fp32.onnx
-
-          ls -lh \
-            app/src/main/assets/LIAE_128_80_48_16_fp32.onnx
-
-
-      # --------------------------------------------------
-      # 19. Setup Java
+      # 2. Setup Java
       # --------------------------------------------------
 
       - name: Setup Java
@@ -280,7 +33,7 @@ jobs:
 
 
       # --------------------------------------------------
-      # 20. Setup Gradle
+      # 3. Setup Gradle
       # --------------------------------------------------
 
       - name: Setup Gradle
@@ -288,21 +41,190 @@ jobs:
 
 
       # --------------------------------------------------
-      # 21. Build APK
+      # 4. Download FULL ONNX from SAEHD-Android
+      # --------------------------------------------------
+
+      - name: Download full LIAE ONNX
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "========================================"
+          echo "DOWNLOADING FULL LIAE ONNX"
+          echo "========================================"
+
+          mkdir -p /tmp/liae_artifact
+
+          gh run download 34077791427 \
+            --repo ppriyesh129-afk/SAEHD-Android \
+            --name LIAE_128_80_48_16_FP32_ONNX_FULL \
+            --dir /tmp/liae_artifact
+
+          echo
+          echo "========================================"
+          echo "DOWNLOADED FILES"
+          echo "========================================"
+
+          find /tmp/liae_artifact -type f -printf '%p %s bytes\n'
+
+
+      # --------------------------------------------------
+      # 5. Verify ONNX exists and is large
+      # --------------------------------------------------
+
+      - name: Verify full ONNX
+        run: |
+          MODEL="/tmp/liae_artifact/LIAE_128_80_48_16_fp32.onnx"
+
+          echo "========================================"
+          echo "VERIFYING ONNX"
+          echo "========================================"
+
+          if [ ! -f "$MODEL" ]; then
+            echo "ERROR: ONNX file not found"
+            find /tmp/liae_artifact -type f -print
+            exit 1
+          fi
+
+          SIZE=$(stat -c%s "$MODEL")
+
+          echo "ONNX size: $SIZE bytes"
+
+          if [ "$SIZE" -lt 10000000 ]; then
+            echo "ERROR: ONNX is suspiciously small"
+            exit 1
+          fi
+
+          echo "✓ FULL ONNX FOUND"
+
+
+      # --------------------------------------------------
+      # 6. Verify graph inputs
+      # --------------------------------------------------
+
+      - name: Verify ONNX graph
+        env:
+          MODEL: /tmp/liae_artifact/LIAE_128_80_48_16_fp32.onnx
+        run: |
+          python -m pip install --disable-pip-version-check \
+            "onnx==1.16.2"
+
+          python - <<'PY'
+          import os
+          import onnx
+
+          path = os.environ["MODEL"]
+
+          print("========================================")
+          print("CHECKING ONNX GRAPH")
+          print("========================================")
+
+          model = onnx.load(path)
+
+          inputs = [x.name for x in model.graph.input]
+
+          print("Inputs:")
+          for name in inputs:
+              print(" -", name)
+
+          outputs = [x.name for x in model.graph.output]
+
+          print()
+          print("Outputs:")
+          for name in outputs:
+              print(" -", name)
+
+          print()
+
+          if set(inputs) != {"src", "dst"}:
+              raise RuntimeError(
+                  "INVALID GRAPH INPUTS: " + str(inputs)
+              )
+
+          print("✓ ONLY src AND dst ARE GRAPH INPUTS")
+          PY
+
+
+      # --------------------------------------------------
+      # 7. Copy REAL ONNX into Android assets
+      # --------------------------------------------------
+
+      - name: Install ONNX into Android assets
+        run: |
+          echo "========================================"
+          echo "INSTALLING ONNX"
+          echo "========================================"
+
+          mkdir -p app/src/main/assets
+
+          rm -f \
+            app/src/main/assets/LIAE_128_80_48_16_fp32.onnx
+
+          cp \
+            /tmp/liae_artifact/LIAE_128_80_48_16_fp32.onnx \
+            app/src/main/assets/LIAE_128_80_48_16_fp32.onnx
+
+          echo
+          echo "=== ANDROID ASSET ==="
+
+          ls -lh \
+            app/src/main/assets/LIAE_128_80_48_16_fp32.onnx
+
+
+      # --------------------------------------------------
+      # 8. Final asset verification
+      # --------------------------------------------------
+
+      - name: Verify Android model asset
+        run: |
+          MODEL="app/src/main/assets/LIAE_128_80_48_16_fp32.onnx"
+
+          SIZE=$(stat -c%s "$MODEL")
+
+          echo "========================================"
+          echo "FINAL MODEL"
+          echo "========================================"
+
+          echo "Path: $MODEL"
+          echo "Size: $SIZE bytes"
+
+          if [ "$SIZE" -lt 10000000 ]; then
+            echo "ERROR: Bad ONNX asset"
+            exit 1
+          fi
+
+          echo "✓ REAL LIAE ONNX IS IN ANDROID ASSETS"
+
+
+      # --------------------------------------------------
+      # 9. Build APK
       # --------------------------------------------------
 
       - name: Build Debug APK
         run: |
           chmod +x gradlew
+
           ./gradlew assembleDebug
 
 
       # --------------------------------------------------
-      # 22. Upload APK
+      # 10. Show APK size
+      # --------------------------------------------------
+
+      - name: Check APK
+        run: |
+          echo "========================================"
+          echo "APK"
+          echo "========================================"
+
+          ls -lh app/build/outputs/apk/debug/app-debug.apk
+
+
+      # --------------------------------------------------
+      # 11. Upload APK
       # --------------------------------------------------
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: LIAE-Android-debug
+          name: LIAE-Android-debug-FULL-ONNX
           path: app/build/outputs/apk/debug/app-debug.apk
