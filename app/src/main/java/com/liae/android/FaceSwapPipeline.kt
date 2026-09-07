@@ -71,14 +71,17 @@ class FaceSwapPipeline(
                 prediction.debugText
 
             /*
-             * DEBUG:
-             * Show the exact aligned 128×128 crop that enters LIAE.
+             * DEBUG OUTPUT
              *
+             * Show the RAW face coming directly from the ONNX model.
              * No warp.
              * No mask.
-             * No merge.
+             * No blending.
              */
-            return alignedTarget.bitmap.copy(
+            val swappedFace =
+                ImageTensor.tensorToBitmap(prediction.rgb)
+
+            return swappedFace.copy(
                 Bitmap.Config.ARGB_8888,
                 false
             )
