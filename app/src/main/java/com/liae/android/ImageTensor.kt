@@ -6,96 +6,139 @@ import android.graphics.Color
 object ImageTensor {
 
     private const val SIZE = 128
+    private const val CHANNELS = 3
+
+    private const val IMAGE_FLOATS =
+        SIZE * SIZE * CHANNELS
+
+    private const val MASK_FLOATS =
+        SIZE * SIZE
 
     /*
-     * Bitmap -> NHWC FloatArray
-     * Shape:
-     * [1,128,128,3]
+     * Bitmap -> NHWC float tensor
+     *
+     * Output:
+     * [1, 128, 128, 3]
+     *
+     * Range:
+     * 0.0 .. 1.0
      */
-    fun bitmapToTensor(bitmap: Bitmap): FloatArray {
+    fun bitmapToTensor(
+        bitmap: Bitmap
+    ): FloatArray {
 
         val resized =
-            Bitmap.createScaledBitmap(
-                bitmap,
+            if (
+                bitmap.width == SIZE &&
+                bitmap.height == SIZE
+            ) {
+                bitmap
+            } else {
+                Bitmap.createScaledBitmap(
+                    bitmap,
+                    SIZE,
+                    SIZE,
+                    true
+                )
+            }
+
+        try {
+
+            val pixels =
+                IntArray(SIZE * SIZE)
+
+            resized.getPixels(
+                pixels,
+                0,
                 SIZE,
+                0,
+                0,
                 SIZE,
-                true
+                SIZE
             )
 
-        val pixels =
-            IntArray(SIZE * SIZE)
+            val tensor =
+                FloatArray(IMAGE_FLOATS)
 
-        resized.getPixels(
-            pixels,
-            0,
-            SIZE,
-            0,
-            0,
-            SIZE,
-            SIZE
-        )
+            var index = 0
 
-        val tensor =
-            FloatArray(SIZE * SIZE * 3)
+            for (pixel in pixels) {
 
-        var i = 0
+                tensor[index++] =
+                    Color.red(pixel) / 255.0f
 
-        for (pixel in pixels) {
+                tensor[index++] =
+                    Color.green(pixel) / 255.0f
 
-            tensor[i++] =
-                Color.red(pixel) / 255f
+                tensor[index++] =
+                    Color.blue(pixel) / 255.0f
+            }
 
-            tensor[i++] =
-                Color.green(pixel) / 255f
+            return tensor
 
-            tensor[i++] =
-                Color.blue(pixel) / 255f
+        } finally {
+
+            if (resized !== bitmap &&
+                !resized.isRecycled
+            ) {
+                resized.recycle()
+            }
         }
-
-        if (resized !== bitmap) {
-            resized.recycle()
-        }
-
-        return tensor
     }
 
     /*
-     * NHWC FloatArray -> Bitmap
-     * Shape:
-     * [1,128,128,3]
+     * NHWC RGB tensor -> 128x128 Bitmap
+     *
+     * Input:
+     * [1, 128, 128, 3]
+     *
+     * Range:
+     * 0.0 .. 1.0
      */
-    fun tensorToBitmap(tensor: FloatArray): Bitmap {
+    fun tensorToBitmap(
+        tensor: FloatArray
+    ): Bitmap {
 
         require(
-            tensor.size == SIZE * SIZE * 3
+            tensor.size == IMAGE_FLOATS
         ) {
-            "Expected ${SIZE * SIZE * 3} floats, got ${tensor.size}"
+            "Expected $IMAGE_FLOATS RGB values, got ${tensor.size}"
         }
 
         val pixels =
             IntArray(SIZE * SIZE)
 
-        var i = 0
+        var index = 0
 
-        for (p in pixels.indices) {
+        for (i in pixels.indices) {
 
             val r =
-                (tensor[i++]
-                    .coerceIn(0f, 1f) * 255f)
-                    .toInt()
+                (
+                    tensor[index++]
+                        .coerceIn(0.0f, 1.0f) *
+                        255.0f
+                ).toInt()
 
             val g =
-                (tensor[i++]
-                    .coerceIn(0f, 1f) * 255f)
-                    .toInt()
+                (
+                    tensor[index++]
+                        .coerceIn(0.0f, 1.0f) *
+                        255.0f
+                ).toInt()
 
             val b =
-                (tensor[i++]
-                    .coerceIn(0f, 1f) * 255f)
-                    .toInt()
+                (
+                    tensor[index++]
+                        .coerceIn(0.0f, 1.0f) *
+                        255.0f
+                ).toInt()
 
-            pixels[p] =
-                Color.rgb(r, g, b)
+            pixels[i] =
+                Color.rgb(
+                    r,
+                    g,
+                    b
+                )
         }
 
         return Bitmap.createBitmap(
@@ -107,30 +150,45 @@ object ImageTensor {
     }
 
     /*
-     * Mask -> Grayscale Bitmap
-     * Shape:
-     * [1,128,128,1]
+     * LIAE mask -> 128x128 grayscale Bitmap
+     *
+     * Input:
+     * [1, 128, 128, 1]
+     *
+     * Range:
+     * 0.0 .. 1.0
+     *
+     * The mask is stored as RGB grayscale.
+     * DflMerger receives it as warpedMask.
      */
-    fun maskToBitmap(mask: FloatArray): Bitmap {
+    fun maskToBitmap(
+        mask: FloatArray
+    ): Bitmap {
 
         require(
-            mask.size == SIZE * SIZE
+            mask.size == MASK_FLOATS
         ) {
-            "Expected ${SIZE * SIZE} mask values, got ${mask.size}"
+            "Expected $MASK_FLOATS mask values, got ${mask.size}"
         }
 
         val pixels =
-            IntArray(SIZE * SIZE)
+            IntArray(MASK_FLOATS)
 
         for (i in pixels.indices) {
 
-            val v =
-                (mask[i]
-                    .coerceIn(0f, 1f) * 255f)
-                    .toInt()
+            val value =
+                (
+                    mask[i]
+                        .coerceIn(0.0f, 1.0f) *
+                        255.0f
+                ).toInt()
 
             pixels[i] =
-                Color.rgb(v, v, v)
+                Color.rgb(
+                    value,
+                    value,
+                    value
+                )
         }
 
         return Bitmap.createBitmap(
