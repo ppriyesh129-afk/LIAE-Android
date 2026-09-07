@@ -7,21 +7,21 @@ import android.provider.MediaStore
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.TextView
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import kotlin.concurrent.thread
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var engine: LiaeUdEngine
+    private var engine: LiaeUdEngine? = null
 
     private lateinit var statusText: TextView
     private lateinit var resultImage: ImageView
+    private lateinit var selectButton: Button
 
     private val imagePicker =
         registerForActivityResult(
-            ActivityResultContracts.GetContent()
+            androidx.activity.result.contract.ActivityResultContracts.GetContent()
         ) { uri: Uri? ->
-
             if (uri != null) {
                 processImage(uri)
             }
@@ -34,66 +34,103 @@ class MainActivity : AppCompatActivity() {
 
         statusText = findViewById(R.id.statusText)
         resultImage = findViewById(R.id.resultImage)
+        selectButton = findViewById(R.id.selectButton)
 
-        engine = LiaeUdEngine(this)
+        statusText.text = "Ready"
 
-        findViewById<Button>(R.id.selectButton).setOnClickListener {
+        selectButton.setOnClickListener {
             imagePicker.launch("image/*")
         }
     }
 
     private fun processImage(uri: Uri) {
 
-        try {
+        selectButton.isEnabled = false
+        statusText.text = "Preparing..."
 
-            statusText.text = "Loading image..."
+        thread {
 
-            val bitmap = MediaStore.Images.Media.getBitmap(
-                contentResolver,
-                uri
-            )
+            try {
 
-            statusText.text = "Preparing tensor..."
+                runOnUiThread {
+                    statusText.text = "Loading LIAE model..."
+                }
 
-            val tensor = ImageTensor.bitmapToTensor(bitmap)
+                if (engine == null) {
+                    engine = LiaeUdEngine(this)
+                }
 
-            statusText.text = "Running LIAE..."
+                runOnUiThread {
+                    statusText.text = "Loading image..."
+                }
 
-            val result = engine.run(
-                src = tensor,
-                dst = tensor
-            )
+                val bitmap: Bitmap =
+                    MediaStore.Images.Media.getBitmap(
+                        contentResolver,
+                        uri
+                    )
 
-            val outputBitmap =
-                ImageTensor.tensorToBitmap(result.rgb)
+                runOnUiThread {
+                    statusText.text = "Preparing tensor..."
+                }
 
-            resultImage.setImageBitmap(outputBitmap)
+                val tensor =
+                    ImageTensor.bitmapToTensor(bitmap)
 
-            statusText.text =
-                """
-                LIAE inference complete
+                runOnUiThread {
+                    statusText.text = "Running LIAE..."
+                }
 
-                RGB: ${result.rgb.size}
-                Mask: ${result.mask.size}
-                """.trimIndent()
+                val result =
+                    engine!!.run(
+                        src = tensor,
+                        dst = tensor
+                    )
 
-        } catch (e: Exception) {
+                val outputBitmap =
+                    ImageTensor.tensorToBitmap(result.rgb)
 
-            statusText.text =
-                """
-                Error
+                runOnUiThread {
 
-                ${e.javaClass.simpleName}
-                ${e.message}
-                """.trimIndent()
+                    resultImage.setImageBitmap(outputBitmap)
+
+                    statusText.text =
+                        """
+                        LIAE inference complete
+
+                        RGB: ${result.rgb.size}
+                        Mask: ${result.mask.size}
+                        """.trimIndent()
+
+                    selectButton.isEnabled = true
+                }
+
+            } catch (e: Throwable) {
+
+                val error =
+                    """
+                    LIAE ERROR
+
+                    ${e.javaClass.name}
+
+                    ${e.message}
+
+                    ${e.stackTraceToString()}
+                    """.trimIndent()
+
+                runOnUiThread {
+
+                    statusText.text = error
+                    selectButton.isEnabled = true
+                }
+            }
         }
     }
 
     override fun onDestroy() {
 
-        if (::engine.isInitialized) {
-            engine.close()
-        }
+        engine?.close()
+        engine = null
 
         super.onDestroy()
     }
