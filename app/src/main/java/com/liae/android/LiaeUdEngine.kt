@@ -1,65 +1,16 @@
 package com.liae.android
 
-import android.content.Context
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
+import android.content.Context
 import java.nio.FloatBuffer
 
 class LiaeUdEngine(context: Context) {
 
     companion object {
-        private const val MODEL_NAME =
-            "LIAE_128_80_48_16_fp32.onnx"
-
+        private const val MODEL_NAME = "LIAE_128_80_48_16_fp32.onnx"
         private const val SIZE = 128
-        private const val CHANNELS = 3
-    }
-
-    private val environment =
-        OrtEnvironment.getEnvironment()
-
-    private val session: OrtSession
-
-    init {
-        val modelFile =
-            context.getFileStreamPath(MODEL_NAME)
-
-        if (!modelFile.exists() ||
-            modelFile.length() < 10_000_000L
-        ) {
-            context.assets.open(MODEL_NAME).use { input ->
-                modelFile.outputStream().use { output ->
-                    input.copyTo(
-                        output,
-                        DEFAULT_BUFFER_SIZE
-                    )
-                }
-            }
-        }
-
-        if (!modelFile.exists()) {
-            throw IllegalStateException(
-                "LIAE model file was not created"
-            )
-        }
-
-        if (modelFile.length() < 10_000_000L) {
-            throw IllegalStateException(
-                "LIAE model is too small: " +
-                    modelFile.length() +
-                    " bytes"
-            )
-        }
-
-        val options =
-            OrtSession.SessionOptions()
-
-        session =
-            environment.createSession(
-                modelFile.absolutePath,
-                options
-            )
     }
 
     data class Result(
@@ -67,127 +18,91 @@ class LiaeUdEngine(context: Context) {
         val mask: FloatArray
     )
 
+    private val env = OrtEnvironment.getEnvironment()
+    private val session: OrtSession
+
+    init {
+
+        val modelFile = context.getFileStreamPath(MODEL_NAME)
+
+        if (!modelFile.exists()) {
+            context.assets.open(MODEL_NAME).use { input ->
+                modelFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+        }
+
+        session = env.createSession(
+            modelFile.absolutePath,
+            OrtSession.SessionOptions()
+        )
+    }
+
     fun run(
         src: FloatArray,
         dst: FloatArray
     ): Result {
 
-        require(
-            src.size ==
-                SIZE * SIZE * CHANNELS
-        ) {
-            "src must contain 128x128x3 floats"
-        }
+        val shape = longArrayOf(1, SIZE.toLong(), SIZE.toLong(), 3)
 
-        require(
-            dst.size ==
-                SIZE * SIZE * CHANNELS
-        ) {
-            "dst must contain 128x128x3 floats"
-        }
+        val srcTensor = OnnxTensor.createTensor(
+            env,
+            FloatBuffer.wrap(src),
+            shape
+        )
 
-        val srcTensor =
-            OnnxTensor.createTensor(
-                environment,
-                FloatBuffer.wrap(src),
-                longArrayOf(
-                    1,
-                    SIZE.toLong(),
-                    SIZE.toLong(),
-                    CHANNELS.toLong()
-                )
-            )
-
-        val dstTensor =
-            OnnxTensor.createTensor(
-                environment,
-                FloatBuffer.wrap(dst),
-                longArrayOf(
-                    1,
-                    SIZE.toLong(),
-                    SIZE.toLong(),
-                    CHANNELS.toLong()
-                )
-            )
+        val dstTensor = OnnxTensor.createTensor(
+            env,
+            FloatBuffer.wrap(dst),
+            shape
+        )
 
         try {
-            val inputs =
+
+            val outputs = session.run(
                 mapOf(
                     "src" to srcTensor,
                     "dst" to dstTensor
                 )
+            )
 
-            session.run(inputs).use { output ->
+            outputs.use {
 
-                val rgb =
-                    flattenTensor(
-                        output[0].value
-                    )
+                val rgb = flatten(outputs[0].value)
+                val mask = flatten(outputs[1].value)
 
-                val mask =
-                    flattenTensor(
-                        output[1].value
-                    )
-
-                return Result(
-                    rgb = rgb,
-                    mask = mask
-                )
+                return Result(rgb, mask)
             }
 
         } finally {
+
             srcTensor.close()
             dstTensor.close()
         }
     }
 
-    private fun flattenTensor(
-        value: Any
-    ): FloatArray {
+    private fun flatten(value: Any): FloatArray {
 
-        return when (value) {
+        val list = ArrayList<Float>()
 
-            is FloatArray -> {
-                value.copyOf()
-            }
+        fun walk(v: Any?) {
 
-            is Array<*> -> {
+            when (v) {
 
-                val values =
-                    ArrayList<Float>()
-
-                fun collect(item: Any?) {
-
-                    when (item) {
-
-                        is FloatArray -> {
-                            for (v in item) {
-                                values.add(v)
-                            }
-                        }
-
-                        is Array<*> -> {
-                            for (child in item) {
-                                collect(child)
-                            }
-                        }
-                    }
+                is FloatArray -> {
+                    for (x in v) list.add(x)
                 }
 
-                collect(value)
-
-                FloatArray(values.size) { index ->
-                    values[index]
+                is Array<*> -> {
+                    for (x in v) walk(x)
                 }
-            }
-
-            else -> {
-                throw IllegalArgumentException(
-                    "Unsupported ONNX output type: " +
-                        value::class.java.name
-                )
             }
         }
+
+        walk(value)
+
+        return FloatArray(list.size) { list[it] }
     }
 
     fun close() {
