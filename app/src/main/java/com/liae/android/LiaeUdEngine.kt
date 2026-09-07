@@ -22,7 +22,6 @@ class LiaeUdEngine(context: Context) {
     private val session: OrtSession
 
     init {
-
         val modelFile = context.getFileStreamPath(MODEL_NAME)
 
         if (!modelFile.exists()) {
@@ -39,10 +38,7 @@ class LiaeUdEngine(context: Context) {
         )
     }
 
-    fun run(
-        src: FloatArray,
-        dst: FloatArray
-    ): Result {
+    fun run(src: FloatArray, dst: FloatArray): Result {
 
         val shape = longArrayOf(1, SIZE.toLong(), SIZE.toLong(), 3)
 
@@ -58,25 +54,20 @@ class LiaeUdEngine(context: Context) {
             shape
         )
 
-        try {
-
-            val outputs = session.run(
+        return try {
+            session.run(
                 mapOf(
                     "src" to srcTensor,
                     "dst" to dstTensor
                 )
-            )
-
-            outputs.use {
+            ).use { outputs ->
 
                 val rgb = flatten(outputs[0].value)
                 val mask = flatten(outputs[1].value)
 
-                return Result(rgb, mask)
+                Result(rgb, mask)
             }
-
         } finally {
-
             srcTensor.close()
             dstTensor.close()
         }
@@ -87,22 +78,15 @@ class LiaeUdEngine(context: Context) {
         val list = ArrayList<Float>()
 
         fun walk(v: Any?) {
-
             when (v) {
-
-                is FloatArray -> {
-                    for (x in v) list.add(x)
-                }
-
-                is Array<*> -> {
-                    for (x in v) walk(x)
-                }
+                is FloatArray -> list.addAll(v.toList())
+                is Array<*> -> v.forEach { walk(it) }
             }
         }
 
         walk(value)
 
-        return FloatArray(list.size) { list[it] }
+        return list.toFloatArray()
     }
 
     fun close() {
