@@ -5,7 +5,6 @@ import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import android.content.Context
 import java.nio.FloatBuffer
-import java.util.Locale
 
 class LiaeUdEngine(context: Context) {
 
@@ -61,21 +60,12 @@ class LiaeUdEngine(context: Context) {
 
     fun run(dst: FloatArray): Result {
 
-        require(dst.size == IMAGE_FLOATS) {
-            "Expected $IMAGE_FLOATS floats, got ${dst.size}"
-        }
-
-        val inputShape = longArrayOf(
-            1,
-            SIZE.toLong(),
-            SIZE.toLong(),
-            CHANNELS.toLong()
-        )
+        require(dst.size == IMAGE_FLOATS)
 
         val inputTensor = OnnxTensor.createTensor(
             env,
             FloatBuffer.wrap(dst),
-            inputShape
+            longArrayOf(1, SIZE.toLong(), SIZE.toLong(), CHANNELS.toLong())
         )
 
         return try {
@@ -96,45 +86,59 @@ class LiaeUdEngine(context: Context) {
                     outputs["output_3"]?.get() as? OnnxTensor
                         ?: error("Missing output_3")
 
-                val rgb =
-                    extractRgb(rgbTensor.value)
+                val rgb = extractRgb(rgbTensor.value)
+                val dstMask = extractMask(dstMaskTensor.value)
+                val srcMask = extractMask(srcMaskTensor.value)
 
-                val dstMask =
-                    extractMask(dstMaskTensor.value)
+                val rgbInfo = rgbTensor.info
+                val maskInfo = dstMaskTensor.info
+                val srcInfo = srcMaskTensor.info
 
-                val srcMask =
-                    extractMask(srcMaskTensor.value)
+                val debugText = buildString {
 
-                val debugText =
-                    String.format(
-                        Locale.US,
-                        "LIAE DEBUG\n" +
-                            "INPUT: [1,128,128,3]\n\n" +
-                            "SWAPPED FACE\n" +
-                            "shape: [1,128,128,3]\n" +
-                            "min: %.5f\n" +
-                            "max: %.5f\n" +
-                            "mean: %.5f\n\n" +
-                            "DST MASK\n" +
-                            "shape: [1,128,128,1]\n" +
-                            "min: %.5f\n" +
-                            "max: %.5f\n" +
-                            "mean: %.5f\n\n" +
-                            "SRC MASK\n" +
-                            "shape: [1,128,128,1]\n" +
-                            "min: %.5f\n" +
-                            "max: %.5f\n" +
-                            "mean: %.5f",
-                        rgb.minOrNull() ?: 0f,
-                        rgb.maxOrNull() ?: 0f,
-                        rgb.average(),
-                        dstMask.minOrNull() ?: 0f,
-                        dstMask.maxOrNull() ?: 0f,
-                        dstMask.average(),
-                        srcMask.minOrNull() ?: 0f,
-                        srcMask.maxOrNull() ?: 0f,
-                        srcMask.average()
-                    )
+                    appendLine("LIAE DEBUG")
+                    appendLine()
+
+                    appendLine("INPUTS")
+                    appendLine(session.inputNames.joinToString())
+                    appendLine()
+
+                    appendLine("OUTPUTS")
+                    appendLine(session.outputNames.joinToString())
+                    appendLine()
+
+                    appendLine("RGB INFO")
+                    appendLine("shape=${rgbInfo.shape.contentToString()}")
+                    appendLine("type=${rgbInfo.type}")
+                    appendLine()
+
+                    appendLine("DST MASK INFO")
+                    appendLine("shape=${maskInfo.shape.contentToString()}")
+                    appendLine("type=${maskInfo.type}")
+                    appendLine()
+
+                    appendLine("SRC MASK INFO")
+                    appendLine("shape=${srcInfo.shape.contentToString()}")
+                    appendLine("type=${srcInfo.type}")
+                    appendLine()
+
+                    appendLine("RGB")
+                    appendLine("min=${rgb.minOrNull()}")
+                    appendLine("max=${rgb.maxOrNull()}")
+                    appendLine("mean=${rgb.average()}")
+                    appendLine()
+
+                    appendLine("DST MASK")
+                    appendLine("min=${dstMask.minOrNull()}")
+                    appendLine("max=${dstMask.maxOrNull()}")
+                    appendLine("mean=${dstMask.average()}")
+                    appendLine()
+
+                    appendLine("SRC MASK")
+                    appendLine("min=${srcMask.minOrNull()}")
+                    appendLine("max=${srcMask.maxOrNull()}")
+                    appendLine("mean=${srcMask.average()}")
+                }
 
                 Result(
                     rgb = rgb,
@@ -149,10 +153,6 @@ class LiaeUdEngine(context: Context) {
         }
     }
 
-    /**
-     * Reads output_2 as NHWC:
-     * [1][128][128][3]
-     */
     private fun extractRgb(value: Any): FloatArray {
 
         val tensor =
@@ -178,10 +178,6 @@ class LiaeUdEngine(context: Context) {
         return out
     }
 
-    /**
-     * Reads output_1/output_3 as NHWC:
-     * [1][128][128][1]
-     */
     private fun extractMask(value: Any): FloatArray {
 
         val tensor =
