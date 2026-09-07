@@ -22,28 +22,14 @@ class LiaeUdEngine(context: Context) {
     private val session: OrtSession
 
     init {
-
-        /*
-         * Copy the ONNX model from APK assets to the app's
-         * internal files directory.
-         *
-         * This avoids:
-         *
-         *     assets -> readBytes() -> 158 MB Java ByteArray
-         *
-         * Instead ONNX Runtime opens the actual file directly.
-         */
-
-        val modelFile = context.getFileStreamPath(MODEL_NAME)
+        val modelFile =
+            context.getFileStreamPath(MODEL_NAME)
 
         if (!modelFile.exists() ||
             modelFile.length() < 10_000_000L
         ) {
-
             context.assets.open(MODEL_NAME).use { input ->
-
                 modelFile.outputStream().use { output ->
-
                     input.copyTo(
                         output,
                         DEFAULT_BUFFER_SIZE
@@ -78,7 +64,13 @@ class LiaeUdEngine(context: Context) {
 
     data class Result(
         val rgb: FloatArray,
-        val mask: FloatArray
+        val mask: FloatArray,
+        val rgbMin: Float,
+        val rgbMax: Float,
+        val rgbMean: Float,
+        val maskMin: Float,
+        val maskMax: Float,
+        val maskMean: Float
     )
 
     fun run(
@@ -144,17 +136,72 @@ class LiaeUdEngine(context: Context) {
                         output[1].value
                     )
 
+                val rgbStats =
+                    statistics(rgb)
+
+                val maskStats =
+                    statistics(mask)
+
                 return Result(
                     rgb = rgb,
-                    mask = mask
+                    mask = mask,
+
+                    rgbMin = rgbStats.min,
+                    rgbMax = rgbStats.max,
+                    rgbMean = rgbStats.mean,
+
+                    maskMin = maskStats.min,
+                    maskMax = maskStats.max,
+                    maskMean = maskStats.mean
                 )
             }
 
         } finally {
-
             srcTensor.close()
             dstTensor.close()
         }
+    }
+
+    private data class Stats(
+        val min: Float,
+        val max: Float,
+        val mean: Float
+    )
+
+    private fun statistics(
+        values: FloatArray
+    ): Stats {
+
+        require(values.isNotEmpty())
+
+        var min =
+            Float.POSITIVE_INFINITY
+
+        var max =
+            Float.NEGATIVE_INFINITY
+
+        var sum = 0.0
+
+        for (value in values) {
+
+            if (value < min) {
+                min = value
+            }
+
+            if (value > max) {
+                max = value
+            }
+
+            sum += value.toDouble()
+        }
+
+        return Stats(
+            min = min,
+            max = max,
+            mean =
+                (sum / values.size)
+                    .toFloat()
+        )
     }
 
     private fun flattenTensor(
@@ -177,12 +224,14 @@ class LiaeUdEngine(context: Context) {
                     when (item) {
 
                         is FloatArray -> {
+
                             for (v in item) {
                                 values.add(v)
                             }
                         }
 
                         is Array<*> -> {
+
                             for (child in item) {
                                 collect(child)
                             }
@@ -192,7 +241,9 @@ class LiaeUdEngine(context: Context) {
 
                 collect(value)
 
-                FloatArray(values.size) { index ->
+                FloatArray(
+                    values.size
+                ) { index ->
                     values[index]
                 }
             }
@@ -211,3 +262,51 @@ class LiaeUdEngine(context: Context) {
         session.close()
     }
 }
+
+Then replace the result section in "MainActivity.kt".
+
+Find:
+
+statusText.text =
+    """
+    LIAE inference complete
+
+    RGB: ${result.rgb.size}
+    Mask: ${result.mask.size}
+    """.trimIndent()
+
+Replace it with:
+
+statusText.text =
+    """
+    LIAE inference complete
+
+    RGB: ${result.rgb.size}
+    Mask: ${result.mask.size}
+
+    RGB min: ${result.rgbMin}
+    RGB max: ${result.rgbMax}
+    RGB mean: ${result.rgbMean}
+
+    Mask min: ${result.maskMin}
+    Mask max: ${result.maskMax}
+    Mask mean: ${result.maskMean}
+    """.trimIndent()
+
+Then
+
+Commit both files and build the APK again.
+
+After installing it, select the same image and send me exactly what it shows for:
+
+RGB min:
+RGB max:
+RGB mean:
+
+Mask min:
+Mask max:
+Mask mean:
+
+Don't change "ImageTensor.kt" yet.
+
+Those six numbers will tell us exactly how the LIAE ONNX output needs to be converted to an Android bitmap.
