@@ -43,13 +43,19 @@ class FaceSwapPipeline(
 
         for (targetFace in targetFaces) {
 
-            result =
+            val next =
                 swapOneFace(
                     sourceImage,
                     sourceFace,
                     result,
                     targetFace
                 )
+
+            if (next !== result) {
+                result.recycle()
+            }
+
+            result = next
         }
 
         return Result(
@@ -152,7 +158,9 @@ class FaceSwapPipeline(
         mask: FloatArray
     ): Bitmap {
 
-        require(mask.size == 128 * 128)
+        require(mask.size == 128 * 128) {
+            "Expected 128x128 mask, got ${mask.size}"
+        }
 
         val pixels =
             IntArray(128 * 128)
@@ -191,9 +199,11 @@ class FaceSwapPipeline(
                 inverse[0],
                 inverse[1],
                 inverse[2],
+
                 inverse[3],
                 inverse[4],
                 inverse[5],
+
                 0f,
                 0f,
                 1f
@@ -225,6 +235,11 @@ class FaceSwapPipeline(
         mask: Bitmap
     ): Bitmap {
 
+        require(background.width == foreground.width)
+        require(background.height == foreground.height)
+        require(background.width == mask.width)
+        require(background.height == mask.height)
+
         val width = background.width
         val height = background.height
 
@@ -255,17 +270,17 @@ class FaceSwapPipeline(
             val fb = fg[i] and 255
 
             val r =
-                (br * (1 - alpha) + fr * alpha)
+                (br * (1f - alpha) + fr * alpha)
                     .toInt()
                     .coerceIn(0, 255)
 
             val g =
-                (bgc * (1 - alpha) + fgc * alpha)
+                (bgc * (1f - alpha) + fgc * alpha)
                     .toInt()
                     .coerceIn(0, 255)
 
             val b =
-                (bb * (1 - alpha) + fb * alpha)
+                (bb * (1f - alpha) + fb * alpha)
                     .toInt()
                     .coerceIn(0, 255)
 
@@ -299,6 +314,7 @@ class FaceSwapPipeline(
     }
 
     fun close() {
+        detector.close()
         liae.close()
     }
 }
