@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build LIAE Android APK
 
 on:
   workflow_dispatch:
@@ -8,29 +8,137 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      - name: Checkout Android project
+        uses: actions/checkout@v4
+
+      - name: Checkout DeepFaceLab
+        uses: actions/checkout@v4
+        with:
+          repository: iperov/DeepFaceLab
+          path: third_party/DeepFaceLab
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+
+          pip install --force-reinstall \
+            "numpy==1.26.4" \
+            "tensorflow==2.15.1" \
+            "tf2onnx==1.16.1" \
+            "onnx==1.16.2" \
+            "onnxruntime==1.18.1"
+
+      - name: Download official LIAE checkpoint
+        run: |
+          mkdir -p model
+
+          wget -O /tmp/LIAE.zip \
+            "https://sourceforge.net/projects/deepfacelab.mirror/files/pretrained/LIAE.f-128-80-48-16-1.000.000.zip/download"
+
+      - name: Extract checkpoint
+        run: |
+          unzip -o /tmp/LIAE.zip -d model
+
+      - name: Prepare checkpoint
+        run: |
+          find model -type f -name "*encoder*.npy" \
+            -exec cp {} model/new_SAEHD_encoder.npy \;
+
+          find model -type f -name "*inter_AB*.npy" \
+            -exec cp {} model/new_SAEHD_inter_AB.npy \;
+
+          find model -type f -name "*inter_B*.npy" \
+            -exec cp {} model/new_SAEHD_inter_B.npy \;
+
+          find model -type f -name "*decoder.npy" \
+            -exec cp {} model/new_SAEHD_decoder.npy \;
+
+          ls -lh model/*.npy
+
+      - name: Verify DeepFaceLab source
+        run: |
+          test -f third_party/DeepFaceLab/core/leras/archis/DeepFakeArchi.py
+
+      - name: Derive architecture
+        run: |
+          python tools/derive_liae.py
+
+      - name: Inspect weights
+        run: |
+          python tools/inspect_model.py
+
+      - name: Test TensorFlow inference
+        run: |
+          python converter/test_inference.py
+
+      - name: Export FP32 ONNX
+        run: |
+          python converter/export_onnx.py
+
+      - name: Verify ONNX
+        run: |
+          python converter/verify_onnx.py
+
+      - name: Check ONNX inputs
+        run: |
+          python - <<'PY'
+          import onnx
+
+          path = "converter/output/LIAE_128_80_48_16_fp32.onnx"
+
+          model = onnx.load(path)
+
+          inputs = [
+              x.name
+              for x in model.graph.input
+          ]
+
+          print("ONNX INPUTS:")
+          for name in inputs:
+              print(" -", name)
+
+          if set(inputs) != {"src", "dst"}:
+              raise RuntimeError(
+                  "INVALID ONNX: expected only src and dst inputs"
+              )
+
+          print("✓ ONNX contains only src and dst inputs")
+          PY
+
+      - name: Copy full ONNX into Android assets
+        run: |
+          mkdir -p app/src/main/assets
+
+          rm -f app/src/main/assets/LIAE_128_80_48_16_fp32.onnx
+
+          cp \
+            converter/output/LIAE_128_80_48_16_fp32.onnx \
+            app/src/main/assets/LIAE_128_80_48_16_fp32.onnx
+
+          ls -lh app/src/main/assets/LIAE_128_80_48_16_fp32.onnx
+
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
-          cache: gradle
+          java-version: "17"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Gradle
+      - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Generate Gradle Wrapper
-        run: gradle wrapper --gradle-version 8.7
-
       - name: Build Debug APK
-        run: ./gradlew assembleDebug
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: LIAE-Android-Debug
+          name: LIAE-Android-debug
           path: app/build/outputs/apk/debug/app-debug.apk
