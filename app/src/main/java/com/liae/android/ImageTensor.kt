@@ -29,19 +29,21 @@ object ImageTensor {
         return tensor
     }
 
-    // NHWC FloatArray -> Bitmap
+    // Planar RGB (3x128x128) -> Bitmap
     fun tensorToBitmap(tensor: FloatArray): Bitmap {
 
         val bmp = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888)
 
-        var i = 0
+        val plane = SIZE * SIZE
 
         for (y in 0 until SIZE) {
             for (x in 0 until SIZE) {
 
-                val r = (tensor[i++].coerceIn(0f, 1f) * 255f).toInt()
-                val g = (tensor[i++].coerceIn(0f, 1f) * 255f).toInt()
-                val b = (tensor[i++].coerceIn(0f, 1f) * 255f).toInt()
+                val i = y * SIZE + x
+
+                val r = (tensor[i].coerceIn(0f, 1f) * 255f).toInt()
+                val g = (tensor[plane + i].coerceIn(0f, 1f) * 255f).toInt()
+                val b = (tensor[plane * 2 + i].coerceIn(0f, 1f) * 255f).toInt()
 
                 bmp.setPixel(x, y, Color.rgb(r, g, b))
             }
