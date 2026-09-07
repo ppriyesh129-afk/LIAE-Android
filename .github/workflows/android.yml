@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   actions: read
 
 jobs:
@@ -12,37 +12,44 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-
-      # --------------------------------------------------
-      # 1. Checkout LIAE-Android
-      # --------------------------------------------------
-
       - name: Checkout LIAE-Android
         uses: actions/checkout@v4
 
-
-      # --------------------------------------------------
-      # 2. Setup Java
-      # --------------------------------------------------
-
-      - name: Setup Java
+      - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-
-      # --------------------------------------------------
-      # 3. Setup Gradle
-      # --------------------------------------------------
-
-      - name: Setup Gradle
+      - name: Install Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
 
+      - name: Generate real Gradle Wrapper
+        run: |
+          echo "========================================"
+          echo "GENERATING GRADLE WRAPPER"
+          echo "========================================"
 
-      # --------------------------------------------------
-      # 4. Download FULL ONNX from SAEHD-Android
-      # --------------------------------------------------
+          gradle wrapper --gradle-version 8.7
+
+          echo
+          echo "========================================"
+          echo "VERIFYING WRAPPER"
+          echo "========================================"
+
+          ls -lh gradlew
+          ls -lh gradlew.bat
+          ls -lh gradle/wrapper/
+
+          test -f gradlew
+          test -f gradlew.bat
+          test -f gradle/wrapper/gradle-wrapper.jar
+          test -f gradle/wrapper/gradle-wrapper.properties
+
+          echo
+          echo "✓ REAL GRADLE WRAPPER GENERATED"
 
       - name: Download full LIAE ONNX
         env:
@@ -60,16 +67,8 @@ jobs:
             --dir /tmp/liae_artifact
 
           echo
-          echo "========================================"
-          echo "DOWNLOADED FILES"
-          echo "========================================"
-
+          echo "DOWNLOADED FILES:"
           find /tmp/liae_artifact -type f -printf '%p %s bytes\n'
-
-
-      # --------------------------------------------------
-      # 5. Verify ONNX exists and is large
-      # --------------------------------------------------
 
       - name: Verify full ONNX
         run: |
@@ -79,11 +78,7 @@ jobs:
           echo "VERIFYING ONNX"
           echo "========================================"
 
-          if [ ! -f "$MODEL" ]; then
-            echo "ERROR: ONNX file not found"
-            find /tmp/liae_artifact -type f -print
-            exit 1
-          fi
+          test -f "$MODEL"
 
           SIZE=$(stat -c%s "$MODEL")
 
@@ -95,11 +90,6 @@ jobs:
           fi
 
           echo "✓ FULL ONNX FOUND"
-
-
-      # --------------------------------------------------
-      # 6. Verify graph inputs
-      # --------------------------------------------------
 
       - name: Verify ONNX graph
         env:
@@ -114,74 +104,60 @@ jobs:
 
           path = os.environ["MODEL"]
 
-          print("========================================")
-          print("CHECKING ONNX GRAPH")
-          print("========================================")
-
           model = onnx.load(path)
 
           inputs = [x.name for x in model.graph.input]
-
-          print("Inputs:")
-          for name in inputs:
-              print(" -", name)
-
           outputs = [x.name for x in model.graph.output]
 
-          print()
-          print("Outputs:")
-          for name in outputs:
-              print(" -", name)
+          print("========================================")
+          print("ONNX INPUTS")
+          print("========================================")
+
+          for x in inputs:
+              print(" -", x)
 
           print()
+          print("========================================")
+          print("ONNX OUTPUTS")
+          print("========================================")
+
+          for x in outputs:
+              print(" -", x)
 
           if set(inputs) != {"src", "dst"}:
               raise RuntimeError(
                   "INVALID GRAPH INPUTS: " + str(inputs)
               )
 
+          print()
           print("✓ ONLY src AND dst ARE GRAPH INPUTS")
           PY
-
-
-      # --------------------------------------------------
-      # 7. Copy REAL ONNX into Android assets
-      # --------------------------------------------------
 
       - name: Install ONNX into Android assets
         run: |
           echo "========================================"
-          echo "INSTALLING ONNX"
+          echo "INSTALLING REAL LIAE ONNX"
           echo "========================================"
 
           mkdir -p app/src/main/assets
-
-          rm -f \
-            app/src/main/assets/LIAE_128_80_48_16_fp32.onnx
 
           cp \
             /tmp/liae_artifact/LIAE_128_80_48_16_fp32.onnx \
             app/src/main/assets/LIAE_128_80_48_16_fp32.onnx
 
-          echo
-          echo "=== ANDROID ASSET ==="
-
           ls -lh \
             app/src/main/assets/LIAE_128_80_48_16_fp32.onnx
-
-
-      # --------------------------------------------------
-      # 8. Final asset verification
-      # --------------------------------------------------
 
       - name: Verify Android model asset
         run: |
           MODEL="app/src/main/assets/LIAE_128_80_48_16_fp32.onnx"
 
+          test -f "$MODEL"
+
           SIZE=$(stat -c%s "$MODEL")
 
           echo "========================================"
-          echo "FINAL MODEL"
+          echo "ANDROID MODEL ASSET"
           echo "========================================"
 
           echo "Path: $MODEL"
@@ -192,23 +168,20 @@ jobs:
             exit 1
           fi
 
-          echo "✓ REAL LIAE ONNX IS IN ANDROID ASSETS"
-
-
-      # --------------------------------------------------
-      # 9. Build APK
-      # --------------------------------------------------
+          echo "✓ REAL LIAE ONNX IS IN ASSETS"
 
       - name: Build Debug APK
         run: |
-          chmod +x gradlew
+          echo "========================================"
+          echo "BUILDING APK"
+          echo "========================================"
 
-          ./gradlew assembleDebug
+          chmod +x ./gradlew
 
-
-      # --------------------------------------------------
-      # 10. Show APK size
-      # --------------------------------------------------
+          ./gradlew \
+            --no-daemon \
+            --stacktrace \
+            assembleDebug
 
       - name: Check APK
         run: |
@@ -218,10 +191,9 @@ jobs:
 
           ls -lh app/build/outputs/apk/debug/app-debug.apk
 
+          test -f app/build/outputs/apk/debug/app-debug.apk
 
-      # --------------------------------------------------
-      # 11. Upload APK
-      # --------------------------------------------------
+          echo "✓ APK BUILD SUCCESSFUL"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
