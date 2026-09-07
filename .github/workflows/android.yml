@@ -52,9 +52,7 @@ jobs:
 
           echo
           echo "Downloaded files:"
-          find /tmp/liae_artifact \
-            -type f \
-            -printf '%p %s bytes\n'
+          find /tmp/liae_artifact -type f -printf '%p %s bytes\n'
 
       # ============================================
       # VERIFY LIAE
@@ -93,9 +91,7 @@ jobs:
           import os
           import onnx
 
-          path = os.environ["MODEL"]
-
-          model = onnx.load(path)
+          model = onnx.load(os.environ["MODEL"])
 
           inputs = [x.name for x in model.graph.input]
           outputs = [x.name for x in model.graph.output]
@@ -103,7 +99,6 @@ jobs:
           print("========================================")
           print("LIAE GRAPH")
           print("========================================")
-
           print("Inputs :", inputs)
           print("Outputs:", outputs)
 
@@ -132,43 +127,39 @@ jobs:
             /tmp/liae_artifact/LIAE_128_80_48_16_fp32.onnx \
             app/src/main/assets/LIAE_128_80_48_16_fp32.onnx
 
-          ls -lh \
-            app/src/main/assets/LIAE_128_80_48_16_fp32.onnx
+          ls -lh app/src/main/assets/LIAE_128_80_48_16_fp32.onnx
 
           echo "✓ LIAE INSTALLED"
 
       # ============================================
-      # DOWNLOAD YUNET
+      # DOWNLOAD BLAZEFACE
       # ============================================
 
-      - name: Download YuNet Face Detector
+      - name: Download BlazeFace Detector
         run: |
           echo "========================================"
-          echo "DOWNLOADING YUNET"
+          echo "DOWNLOADING BLAZEFACE"
           echo "========================================"
 
           mkdir -p app/src/main/assets
 
           wget \
             --no-verbose \
-            --output-document \
-            app/src/main/assets/face_detection_yunet_2023mar.onnx \
-            "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
+            --output-document app/src/main/assets/blazeface.onnx \
+            "https://github.com/ppriyesh129-afk/LIAE-Android/raw/main/models/blazeface.onnx"
 
-          test -f \
-            app/src/main/assets/face_detection_yunet_2023mar.onnx
+          test -f app/src/main/assets/blazeface.onnx
 
-          SIZE=$(stat -c%s \
-            app/src/main/assets/face_detection_yunet_2023mar.onnx)
+          SIZE=$(stat -c%s app/src/main/assets/blazeface.onnx)
 
-          echo "YuNet size: $SIZE bytes"
+          echo "BlazeFace size: $SIZE bytes"
 
-          if [ "$SIZE" -lt 100000 ]; then
-            echo "ERROR: YuNet model download failed"
+          if [ "$SIZE" -lt 500000 ]; then
+            echo "ERROR: BlazeFace download failed"
             exit 1
           fi
 
-          echo "✓ YUNET DOWNLOADED"
+          echo "✓ BLAZEFACE DOWNLOADED"
 
       # ============================================
       # VERIFY BOTH MODELS
@@ -184,14 +175,11 @@ jobs:
 
           echo
 
-          test -f \
-            app/src/main/assets/LIAE_128_80_48_16_fp32.onnx
-
-          test -f \
-            app/src/main/assets/face_detection_yunet_2023mar.onnx
+          test -f app/src/main/assets/LIAE_128_80_48_16_fp32.onnx
+          test -f app/src/main/assets/blazeface.onnx
 
           echo "✓ LIAE MODEL PRESENT"
-          echo "✓ YUNET MODEL PRESENT"
+          echo "✓ BLAZEFACE MODEL PRESENT"
 
       # ============================================
       # BUILD APK
@@ -235,5 +223,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: LIAE-Android-debug-FACE-DETECTOR
+          name: LIAE-Android-debug-BlazeFace
           path: app/build/outputs/apk/debug/app-debug.apk
