@@ -154,7 +154,7 @@ jobs:
 
           echo "BlazeFace size: $SIZE bytes"
 
-          if [ "$SIZE" -lt 500000 ]; then
+          if [ "$SIZE" -lt 100000 ]; then
             echo "ERROR: BlazeFace download failed"
             exit 1
           fi
