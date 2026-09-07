@@ -1,95 +1,72 @@
 package com.liae.android
 
-import ai.onnxruntime.OnnxTensor
-import ai.onnxruntime.OrtEnvironment
-import ai.onnxruntime.OrtSession
-import android.content.Context
-import java.nio.FloatBuffer
+import android.graphics.Bitmap
+import android.graphics.Color
 
-class LiaeUdEngine(context: Context) {
+object ImageTensor {
 
-    companion object {
-        private const val MODEL_NAME = "LIAE_128_80_48_16_fp32.onnx"
-        private const val SIZE = 128
-    }
+    private const val SIZE = 128
 
-    data class Result(
-        val rgb: FloatArray,
-        val mask: FloatArray
-    )
+    // Bitmap -> NCHW FloatArray (1x3x128x128)
+    fun bitmapToTensor(bitmap: Bitmap): FloatArray {
 
-    private val env = OrtEnvironment.getEnvironment()
-    private val session: OrtSession
+        val resized = Bitmap.createScaledBitmap(bitmap, SIZE, SIZE, true)
 
-    init {
-        val modelFile = context.getFileStreamPath(MODEL_NAME)
+        val tensor = FloatArray(3 * SIZE * SIZE)
 
-        if (!modelFile.exists()) {
-            context.assets.open(MODEL_NAME).use { input ->
-                modelFile.outputStream().use { output ->
-                    input.copyTo(output)
-                }
+        var i = 0
+        for (y in 0 until SIZE) {
+            for (x in 0 until SIZE) {
+
+                val c = resized.getPixel(x, y)
+
+                tensor[i] = Color.red(c) / 255f
+                tensor[SIZE * SIZE + i] = Color.green(c) / 255f
+                tensor[2 * SIZE * SIZE + i] = Color.blue(c) / 255f
+
+                i++
             }
         }
 
-        session = env.createSession(
-            modelFile.absolutePath,
-            OrtSession.SessionOptions()
-        )
+        return tensor
     }
 
-    fun run(src: FloatArray, dst: FloatArray): Result {
+    // NCHW FloatArray -> Bitmap
+    fun tensorToBitmap(tensor: FloatArray): Bitmap {
 
-        // DeepFaceLab LIAE uses NCHW
-        val shape = longArrayOf(1, 3, SIZE.toLong(), SIZE.toLong())
+        val bmp = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888)
 
-        val srcTensor = OnnxTensor.createTensor(
-            env,
-            FloatBuffer.wrap(src),
-            shape
-        )
+        var i = 0
+        for (y in 0 until SIZE) {
+            for (x in 0 until SIZE) {
 
-        val dstTensor = OnnxTensor.createTensor(
-            env,
-            FloatBuffer.wrap(dst),
-            shape
-        )
+                val r = (tensor[i].coerceIn(0f, 1f) * 255f).toInt()
+                val g = (tensor[SIZE * SIZE + i].coerceIn(0f, 1f) * 255f).toInt()
+                val b = (tensor[2 * SIZE * SIZE + i].coerceIn(0f, 1f) * 255f).toInt()
 
-        return try {
-            session.run(
-                mapOf(
-                    "src" to srcTensor,
-                    "dst" to dstTensor
-                )
-            ).use { outputs ->
-
-                val rgb = flatten(outputs[0].value)
-                val mask = flatten(outputs[1].value)
-
-                Result(rgb, mask)
-            }
-        } finally {
-            srcTensor.close()
-            dstTensor.close()
-        }
-    }
-
-    private fun flatten(value: Any): FloatArray {
-
-        val out = ArrayList<Float>()
-
-        fun walk(v: Any?) {
-            when (v) {
-                is FloatArray -> out.addAll(v.toList())
-                is Array<*> -> v.forEach { walk(it) }
+                bmp.setPixel(x, y, Color.rgb(r, g, b))
+                i++
             }
         }
 
-        walk(value)
-        return out.toFloatArray()
+        return bmp
     }
 
-    fun close() {
-        session.close()
+    // Mask -> grayscale Bitmap
+    fun maskToBitmap(mask: FloatArray): Bitmap {
+
+        val bmp = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888)
+
+        var i = 0
+        for (y in 0 until SIZE) {
+            for (x in 0 until SIZE) {
+
+                val v = (mask[i].coerceIn(0f, 1f) * 255f).toInt()
+                bmp.setPixel(x, y, Color.rgb(v, v, v))
+                i++
+            }
+        }
+
+        return bmp
     }
 }
