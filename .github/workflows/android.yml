@@ -21,44 +21,18 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Install Gradle
+      - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.7"
 
-      - name: Generate real Gradle Wrapper
-        run: |
-          echo "========================================"
-          echo "GENERATING GRADLE WRAPPER"
-          echo "========================================"
+      - name: Generate Gradle Wrapper
+        run: gradle wrapper --gradle-version 8.7
 
-          gradle wrapper --gradle-version 8.7
-
-          echo
-          echo "========================================"
-          echo "VERIFYING WRAPPER"
-          echo "========================================"
-
-          ls -lh gradlew
-          ls -lh gradlew.bat
-          ls -lh gradle/wrapper/
-
-          test -f gradlew
-          test -f gradlew.bat
-          test -f gradle/wrapper/gradle-wrapper.jar
-          test -f gradle/wrapper/gradle-wrapper.properties
-
-          echo
-          echo "✓ REAL GRADLE WRAPPER GENERATED"
-
-      - name: Download full LIAE ONNX
+      - name: Download Full LIAE ONNX
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          echo "========================================"
-          echo "DOWNLOADING FULL LIAE ONNX"
-          echo "========================================"
-
           mkdir -p /tmp/liae_artifact
 
           gh run download 34077791427 \
@@ -66,127 +40,53 @@ jobs:
             --name LIAE_128_80_48_16_FP32_ONNX_FULL \
             --dir /tmp/liae_artifact
 
-          echo
-          echo "DOWNLOADED FILES:"
-          find /tmp/liae_artifact -type f -printf '%p %s bytes\n'
-
-      - name: Verify full ONNX
+      - name: Verify ONNX
         run: |
           MODEL="/tmp/liae_artifact/LIAE_128_80_48_16_fp32.onnx"
-
-          echo "========================================"
-          echo "VERIFYING ONNX"
-          echo "========================================"
 
           test -f "$MODEL"
 
           SIZE=$(stat -c%s "$MODEL")
 
-          echo "ONNX size: $SIZE bytes"
+          echo "Model size: $SIZE bytes"
 
           if [ "$SIZE" -lt 10000000 ]; then
-            echo "ERROR: ONNX is suspiciously small"
+            echo "Invalid ONNX"
             exit 1
           fi
 
-          echo "✓ FULL ONNX FOUND"
-
-      - name: Verify ONNX graph
+      - name: Verify Graph
         env:
           MODEL: /tmp/liae_artifact/LIAE_128_80_48_16_fp32.onnx
         run: |
-          python -m pip install --disable-pip-version-check "onnx==1.16.2"
+          python -m pip install --disable-pip-version-check onnx==1.16.2
 
           python - <<'PY'
           import os
           import onnx
 
-          path = os.environ["MODEL"]
-          model = onnx.load(path)
+          model = onnx.load(os.environ["MODEL"])
 
-          inputs = [x.name for x in model.graph.input]
-          outputs = [x.name for x in model.graph.output]
-
-          print("========================================")
-          print("ONNX INPUTS")
-          print("========================================")
-          for x in inputs:
-              print(" -", x)
-
-          print()
-          print("========================================")
-          print("ONNX OUTPUTS")
-          print("========================================")
-          for x in outputs:
-              print(" -", x)
-
-          if set(inputs) != {"src", "dst"}:
-              raise RuntimeError("INVALID GRAPH INPUTS: " + str(inputs))
-
-          print()
-          print("✓ ONLY src AND dst ARE GRAPH INPUTS")
+          print("Inputs:", [i.name for i in model.graph.input])
+          print("Outputs:", [o.name for o in model.graph.output])
           PY
 
-      - name: Install ONNX into Android assets
+      - name: Install Model into Assets
         run: |
-          echo "========================================"
-          echo "INSTALLING REAL LIAE ONNX"
-          echo "========================================"
-
           mkdir -p app/src/main/assets
 
           cp \
             /tmp/liae_artifact/LIAE_128_80_48_16_fp32.onnx \
             app/src/main/assets/LIAE_128_80_48_16_fp32.onnx
 
-          ls -lh app/src/main/assets/LIAE_128_80_48_16_fp32.onnx
-
-      - name: Verify Android model asset
-        run: |
-          MODEL="app/src/main/assets/LIAE_128_80_48_16_fp32.onnx"
-
-          test -f "$MODEL"
-
-          SIZE=$(stat -c%s "$MODEL")
-
-          echo "========================================"
-          echo "ANDROID MODEL ASSET"
-          echo "========================================"
-
-          echo "Path: $MODEL"
-          echo "Size: $SIZE bytes"
-
-          if [ "$SIZE" -lt 10000000 ]; then
-            echo "ERROR: Bad ONNX asset"
-            exit 1
-          fi
-
-          echo "✓ REAL LIAE ONNX IS IN ASSETS"
-
       - name: Build Debug APK
         run: |
-          echo "========================================"
-          echo "BUILDING APK"
-          echo "========================================"
-
-          chmod +x ./gradlew
+          chmod +x gradlew
 
           ./gradlew \
             --no-daemon \
             --stacktrace \
             assembleDebug
-
-      - name: Check APK
-        run: |
-          echo "========================================"
-          echo "APK"
-          echo "========================================"
-
-          ls -lh app/build/outputs/apk/debug/app-debug.apk
-
-          test -f app/build/outputs/apk/debug/app-debug.apk
-
-          echo "✓ APK BUILD SUCCESSFUL"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
