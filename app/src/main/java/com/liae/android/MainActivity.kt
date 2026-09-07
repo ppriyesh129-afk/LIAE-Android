@@ -1,29 +1,22 @@
 package com.liae.android
 
-import android.app.Activity
-import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
-import android.provider.MediaStore
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import java.io.InputStream
 import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
 
-    companion object {
-        private const val REQUEST_SOURCE = 1001
-        private const val REQUEST_TARGET = 1002
-    }
-
-    private lateinit var selectButton: Button
-    private lateinit var resultImage: ImageView
     private lateinit var statusText: TextView
+    private lateinit var resultImage: ImageView
+    private lateinit var sourceButton: Button
+    private lateinit var targetButton: Button
 
     private var sourceBitmap: Bitmap? = null
     private var targetBitmap: Bitmap? = null
@@ -32,6 +25,97 @@ class MainActivity : AppCompatActivity() {
 
     private val executor =
         Executors.newSingleThreadExecutor()
+
+    private val sourcePicker =
+        registerForActivityResult(
+            ActivityResultContracts.GetContent()
+        ) { uri: Uri? ->
+
+            if (uri == null) return@registerForActivityResult
+
+            executor.execute {
+
+                try {
+
+                    val bitmap =
+                        loadBitmap(uri)
+                            ?: throw IllegalStateException(
+                                "Could not load source image"
+                            )
+
+                    sourceBitmap?.recycle()
+                    sourceBitmap = bitmap
+
+                    runOnUiThread {
+
+                        statusText.text =
+                            "Source selected. Select target image."
+
+                        targetButton.isEnabled = true
+                    }
+
+                } catch (e: Throwable) {
+
+                    runOnUiThread {
+
+                        statusText.text =
+                            "SOURCE ERROR: " +
+                                (e.message
+                                    ?: e.javaClass.simpleName)
+
+                    }
+                }
+            }
+        }
+
+    private val targetPicker =
+        registerForActivityResult(
+            ActivityResultContracts.GetContent()
+        ) { uri: Uri? ->
+
+            if (uri == null) return@registerForActivityResult
+
+            executor.execute {
+
+                try {
+
+                    val bitmap =
+                        loadBitmap(uri)
+                            ?: throw IllegalStateException(
+                                "Could not load target image"
+                            )
+
+                    targetBitmap?.recycle()
+                    targetBitmap = bitmap
+
+                    runOnUiThread {
+
+                        statusText.text =
+                            "Target selected. Starting face swap..."
+
+                        sourceButton.isEnabled = false
+                        targetButton.isEnabled = false
+                    }
+
+                    runFaceSwap()
+
+                } catch (e: Throwable) {
+
+                    e.printStackTrace()
+
+                    runOnUiThread {
+
+                        statusText.text =
+                            "TARGET ERROR: " +
+                                (e.message
+                                    ?: e.javaClass.simpleName)
+
+                        sourceButton.isEnabled = true
+                        targetButton.isEnabled = true
+                    }
+                }
+            }
+        }
 
     override fun onCreate(
         savedInstanceState: Bundle?
@@ -42,9 +126,9 @@ class MainActivity : AppCompatActivity() {
             R.layout.activity_main
         )
 
-        selectButton =
+        statusText =
             findViewById(
-                R.id.selectButton
+                R.id.statusText
             )
 
         resultImage =
@@ -52,142 +136,41 @@ class MainActivity : AppCompatActivity() {
                 R.id.resultImage
             )
 
-        statusText =
+        sourceButton =
             findViewById(
-                R.id.statusText
+                R.id.sourceButton
             )
 
-        selectButton.setOnClickListener {
+        targetButton =
+            findViewById(
+                R.id.targetButton
+            )
 
-            chooseSourceImage()
-        }
+        targetButton.isEnabled = false
 
         statusText.text =
             "Select source face"
-    }
 
-    private fun chooseSourceImage() {
+        sourceButton.setOnClickListener {
 
-        val intent =
-            Intent(
-                Intent.ACTION_OPEN_DOCUMENT
+            sourcePicker.launch(
+                "image/*"
             )
-
-        intent.type =
-            "image/*"
-
-        intent.addCategory(
-            Intent.CATEGORY_OPENABLE
-        )
-
-        startActivityForResult(
-            intent,
-            REQUEST_SOURCE
-        )
-    }
-
-    private fun chooseTargetImage() {
-
-        val intent =
-            Intent(
-                Intent.ACTION_OPEN_DOCUMENT
-            )
-
-        intent.type =
-            "image/*"
-
-        intent.addCategory(
-            Intent.CATEGORY_OPENABLE
-        )
-
-        startActivityForResult(
-            intent,
-            REQUEST_TARGET
-        )
-    }
-
-    @Deprecated(
-        "Use Activity Result API in future"
-    )
-    override fun onActivityResult(
-        requestCode: Int,
-        resultCode: Int,
-        data: Intent?
-    ) {
-        super.onActivityResult(
-            requestCode,
-            resultCode,
-            data
-        )
-
-        if (
-            resultCode != Activity.RESULT_OK ||
-            data?.data == null
-        ) {
-            return
         }
 
-        val uri =
-            data.data!!
+        targetButton.setOnClickListener {
 
-        when (requestCode) {
-
-            REQUEST_SOURCE -> {
-
-                val bitmap =
-                    loadBitmap(uri)
-
-                if (bitmap == null) {
-
-                    statusText.text =
-                        "Could not load source image"
-
-                    return
-                }
-
-                sourceBitmap?.recycle()
-
-                sourceBitmap =
-                    bitmap
+            if (sourceBitmap == null) {
 
                 statusText.text =
-                    "Source selected. Select target face."
+                    "Select source image first"
 
-                selectButton.text =
-                    "Select Target Image"
-
-                selectButton.setOnClickListener {
-
-                    chooseTargetImage()
-                }
+                return@setOnClickListener
             }
 
-            REQUEST_TARGET -> {
-
-                val bitmap =
-                    loadBitmap(uri)
-
-                if (bitmap == null) {
-
-                    statusText.text =
-                        "Could not load target image"
-
-                    return
-                }
-
-                targetBitmap?.recycle()
-
-                targetBitmap =
-                    bitmap
-
-                statusText.text =
-                    "Target selected. Starting face swap..."
-
-                selectButton.isEnabled =
-                    false
-
-                runFaceSwap()
-            }
+            targetPicker.launch(
+                "image/*"
+            )
         }
     }
 
@@ -195,11 +178,9 @@ class MainActivity : AppCompatActivity() {
         uri: Uri
     ): Bitmap? {
 
-        return try {
-
-            contentResolver.openInputStream(
-                uri
-            ).use { input ->
+        return contentResolver
+            .openInputStream(uri)
+            .use { input ->
 
                 if (input == null) {
                     return null
@@ -209,143 +190,111 @@ class MainActivity : AppCompatActivity() {
                     input
                 )
             }
-
-        } catch (
-            e: Exception
-        ) {
-
-            e.printStackTrace()
-
-            null
-        }
     }
 
     private fun runFaceSwap() {
 
         val source =
             sourceBitmap
+                ?: throw IllegalStateException(
+                    "Source image missing"
+                )
 
         val target =
             targetBitmap
+                ?: throw IllegalStateException(
+                    "Target image missing"
+                )
 
-        if (
-            source == null ||
-            target == null
-        ) {
+        try {
 
-            statusText.text =
-                "Source or target image missing"
+            runOnUiThread {
 
-            selectButton.isEnabled =
-                true
+                statusText.text =
+                    "Loading LIAE-UD + YuNet..."
+            }
 
-            return
-        }
+            if (pipeline == null) {
 
-        executor.execute {
-
-            try {
-
-                /*
-                 * Create the heavy ONNX pipeline
-                 * only when the swap is requested.
-                 */
-                if (pipeline == null) {
-
-                    runOnUiThread {
-
-                        statusText.text =
-                            "Loading LIAE-UD model..."
-                    }
-
-                    val detector =
-                        YuNetDetector(
-                            this@MainActivity
-                        )
-
-                    val liae =
-                        LiaeUdEngine(
-                            this@MainActivity
-                        )
-
-                    pipeline =
-                        FaceSwapPipeline(
-                            detector,
-                            liae
-                        )
-                }
-
-                runOnUiThread {
-
-                    statusText.text =
-                        "Running face detection..."
-                }
-
-                val currentPipeline =
-                    pipeline
-                        ?: throw IllegalStateException(
-                            "Pipeline initialization failed"
-                        )
-
-                val result =
-                    currentPipeline.swap(
-                        sourceImage = source,
-                        targetImage = target
+                val detector =
+                    YuNetDetector(
+                        this@MainActivity
                     )
 
-                runOnUiThread {
-
-                    resultImage.setImageBitmap(
-                        result.bitmap
+                val liae =
+                    LiaeUdEngine(
+                        this@MainActivity
                     )
 
-                    statusText.text =
-                        "Face swap complete. " +
-                            "Faces: " +
-                            result.facesDetected
+                pipeline =
+                    FaceSwapPipeline(
+                        detector,
+                        liae
+                    )
+            }
 
-                    selectButton.isEnabled =
-                        true
+            runOnUiThread {
 
-                    selectButton.text =
-                        "Select New Source"
+                statusText.text =
+                    "Detecting faces..."
+            }
 
-                    selectButton.setOnClickListener {
+            val currentPipeline =
+                pipeline
+                    ?: throw IllegalStateException(
+                        "Pipeline initialization failed"
+                    )
 
-                        chooseSourceImage()
-                    }
-                }
+            runOnUiThread {
 
-            } catch (
-                e: Exception
-            ) {
+                statusText.text =
+                    "Running LIAE-UD face swap..."
+            }
 
-                e.printStackTrace()
+            val result =
+                currentPipeline.swap(
+                    sourceImage = source,
+                    targetImage = target
+                )
 
-                val message =
-                    e.message
-                        ?: e.javaClass.simpleName
+            runOnUiThread {
 
-                runOnUiThread {
+                resultImage.setImageBitmap(
+                    result.bitmap
+                )
 
-                    statusText.text =
-                        "ERROR: $message"
+                statusText.text =
+                    "Face swap complete\n" +
+                        "Faces detected: " +
+                        result.facesDetected
 
-                    selectButton.isEnabled =
-                        true
-                }
+                sourceButton.isEnabled = true
+                targetButton.isEnabled = true
+            }
+
+        } catch (e: Throwable) {
+
+            e.printStackTrace()
+
+            runOnUiThread {
+
+                statusText.text =
+                    "FACE SWAP ERROR\n\n" +
+                        e.javaClass.simpleName +
+                        "\n" +
+                        (e.message ?: "Unknown error")
+
+                sourceButton.isEnabled = true
+                targetButton.isEnabled = true
             }
         }
     }
 
     override fun onDestroy() {
 
-        super.onDestroy()
-
         executor.shutdownNow()
 
         pipeline?.close()
-
         pipeline = null
 
         sourceBitmap?.recycle()
@@ -353,5 +302,7 @@ class MainActivity : AppCompatActivity() {
 
         sourceBitmap = null
         targetBitmap = null
+
+        super.onDestroy()
     }
 }
