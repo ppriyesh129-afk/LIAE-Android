@@ -31,12 +31,14 @@ class FaceSwapPipeline(
             detector.detect(targetImage)
 
         if (sourceFaces.isEmpty()) {
+
             throw IllegalStateException(
                 "No face detected in source image"
             )
         }
 
         if (targetFaces.isEmpty()) {
+
             throw IllegalStateException(
                 "No face detected in target image"
             )
@@ -120,6 +122,14 @@ class FaceSwapPipeline(
             lastDebugText =
                 prediction.debugText
 
+            /*
+             * Convert raw LIAE output to Bitmap.
+             *
+             * IMPORTANT:
+             *
+             * This is the direct model output before
+             * warping and before merging.
+             */
             val swappedFace =
                 ImageTensor.tensorToBitmap(
                     prediction.rgb
@@ -187,6 +197,7 @@ class FaceSwapPipeline(
 
         matrix.setValues(
             floatArrayOf(
+
                 inverse[0],
                 inverse[1],
                 inverse[2],
@@ -208,13 +219,19 @@ class FaceSwapPipeline(
                 Bitmap.Config.ARGB_8888
             )
 
-        Canvas(output).drawBitmap(
-            alignedFace,
-            matrix,
+        val canvas =
+            Canvas(output)
+
+        val paint =
             Paint(
                 Paint.ANTI_ALIAS_FLAG or
                     Paint.FILTER_BITMAP_FLAG
             )
+
+        canvas.drawBitmap(
+            alignedFace,
+            matrix,
+            paint
         )
 
         return output
